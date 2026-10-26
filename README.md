@@ -20,7 +20,7 @@ GitHub, Discord and scheduled automations. Your conversations stay on your machi
 ## Install
 
 ```bash
-git clone https://github.com/<your-org>/vdx-agent.git
+git clone https://github.com/VDX-Technologies/OpenAgent.git
 cd vdx-agent
 ./scripts/install.sh            # add --autostart to launch at login
 ollama pull qwen2.5:7b          # or pick a model in the welcome guide

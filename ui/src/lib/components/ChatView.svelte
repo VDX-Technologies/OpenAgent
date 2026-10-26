@@ -181,7 +181,7 @@
     <div class="msg-in flex min-h-0 flex-1 flex-col items-center justify-center px-6 pb-[12vh]">
       <div class="mb-7 flex items-center gap-3">
         <span class="logo-tile h-9 w-9 !rounded-[10px]"><img src="/brand/vdx-mark.png" alt="" /></span>
-        <span class="text-[26px] font-medium tracking-[-0.01em]">{model || status?.model || "VDX Agent"}</span>
+        <span class="text-[26px] font-medium tracking-[-0.01em]">{model || status?.model || "VDX OpenAgent"}</span>
       </div>
       <div class="w-full max-w-2xl">{@render composer()}</div>
       <div class="mt-6 w-full max-w-2xl px-3">

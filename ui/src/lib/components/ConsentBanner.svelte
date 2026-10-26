@@ -24,7 +24,7 @@
 
 {#if show}
   <div class="msg-in fixed right-5 bottom-5 z-40 w-[340px] rounded-xl border border-[var(--border-strong)] bg-[var(--bg-elevated)] p-4 shadow-2xl" role="dialog" aria-label="Telemetry consent">
-    <p class="text-[13px] font-medium">Help improve VDX Agent?</p>
+    <p class="text-[13px] font-medium">Help improve VDX OpenAgent?</p>
     <p class="mt-1.5 text-[12px] leading-relaxed text-[var(--text-muted)]">
       Share anonymous performance data: model, token counts, GPU/CPU time and your Mac model.
       Never your messages, files, accounts or IP address.

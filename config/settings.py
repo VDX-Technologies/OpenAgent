@@ -1,5 +1,5 @@
 """
-VDX Agent — Configuration
+VDX OpenAgent — Configuration
 =========================
 Settings are loaded from environment variables (via a .env file)
 or fall back to sensible defaults. The Settings page in the web UI

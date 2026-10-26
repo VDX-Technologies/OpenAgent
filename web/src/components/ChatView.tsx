@@ -238,7 +238,7 @@ export function ChatView() {
             onKeyDown={onKeyDown}
             disabled={busy}
             rows={1}
-            placeholder="Message VDX Agent…  (Enter to send · Shift+Enter for newline)"
+            placeholder="Message VDX OpenAgent…  (Enter to send · Shift+Enter for newline)"
             className="max-h-40 min-h-[44px] w-full resize-none bg-transparent px-2 py-2 text-[14px] text-[var(--text)] outline-none placeholder:text-[var(--text-dim)] disabled:opacity-50"
           />
           <div className="flex items-center gap-1">

@@ -15,7 +15,7 @@
   });
 </script>
 
-<svelte:head><title>VDX Agent</title></svelte:head>
+<svelte:head><title>VDX OpenAgent</title></svelte:head>
 
 <div class="pywebview-drag-region titlebar-strip"></div>
 <div class="app-shell flex h-screen overflow-hidden">

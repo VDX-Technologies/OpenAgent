@@ -1,5 +1,5 @@
 """
-VDX Agent — entry point
+VDX OpenAgent — entry point
 =======================
 Runs the API and (if built) the web UI on http://127.0.0.1:8741.
 
@@ -29,10 +29,10 @@ def _wait_and_open(url: str) -> None:
 
 
 def main() -> None:
-    """Run the VDX Agent API (+ bundled web UI)."""
+    """Run the VDX OpenAgent API (+ bundled web UI)."""
     import uvicorn
 
-    parser = argparse.ArgumentParser(description="VDX Agent — local macOS assistant")
+    parser = argparse.ArgumentParser(description="VDX OpenAgent — local macOS assistant")
     parser.add_argument("--port", type=int, default=8741)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--open", action="store_true", help="open the UI in the browser")

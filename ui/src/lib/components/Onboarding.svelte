@@ -74,7 +74,7 @@
         <div class="msg-in min-h-[280px] px-6 py-5">
           {#if step === 0}
             <span class="logo-tile mb-4 h-12 w-12 !rounded-xl"><img src="/brand/vdx-mark.png" alt="VDX" /></span>
-            <h2 class="wordmark text-[24px]">Welcome to VDX Agent</h2>
+            <h2 class="wordmark text-[24px]">Welcome to VDX OpenAgent</h2>
             <ul class="mt-4 flex flex-col gap-2 text-[13px] text-[var(--text-muted)]">
               <li>· Runs 100% locally on your Mac with Ollama.</li>
               <li>· Talks to Calendar, Reminders, Mail, GitHub and more.</li>

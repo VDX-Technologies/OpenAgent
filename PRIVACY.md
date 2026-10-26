@@ -1,6 +1,6 @@
 # Privacy
 
-VDX Agent runs locally. Your chats, memory, settings and tokens are stored in
+VDX OpenAgent runs locally. Your chats, memory, settings and tokens are stored in
 `data/` and `.env` on your Mac. They are never uploaded.
 
 ## Optional anonymous telemetry

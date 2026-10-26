@@ -1,1 +1,1 @@
-"""VDX Agent HTTP API (FastAPI)."""
+"""VDX OpenAgent HTTP API (FastAPI)."""

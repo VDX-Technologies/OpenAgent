@@ -17,7 +17,7 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "VDX Agent",
+  title: "VDX OpenAgent",
   description: "Local macOS AI agent — Ollama, Calendar, Reminders, Gmail, Discord",
 };
 

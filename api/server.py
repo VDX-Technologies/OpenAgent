@@ -1,5 +1,5 @@
 """
-VDX Agent · FastAPI Server
+VDX OpenAgent · FastAPI Server
 ==========================
 HTTP API consumed by the SvelteKit frontend (ui/). Exposes chat,
 status, history, and settings endpoints. Optionally starts
@@ -83,11 +83,11 @@ async def lifespan(app: FastAPI):
         share.stop()
     if memory:
         memory.close()
-    logger.info("VDX Agent API shut down")
+    logger.info("VDX OpenAgent API shut down")
 
 
 app = FastAPI(
-    title="VDX Agent API",
+    title="VDX OpenAgent API",
     version="1.0.0",
     lifespan=lifespan,
 )

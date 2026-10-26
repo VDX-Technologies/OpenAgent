@@ -1,4 +1,4 @@
-# VDX Agent
+# VDX OpenAgent
 
 A local, open-source AI assistant for macOS. It runs models on your Mac with
 [Ollama](https://ollama.com) and can work with Calendar, Reminders, Mail/Gmail,
@@ -6,7 +6,7 @@ GitHub, Discord and scheduled automations. Your conversations stay on your machi
 
 - **Backend:** Python 3.10+ / FastAPI on `http://127.0.0.1:8741`
 - **UI:** SvelteKit (Svelte 5, TypeScript, Tailwind), built as static files and served by the API
-- **App:** a native window (pywebview) installed as `~/Applications/VDX Agent.app`
+- **App:** a native window (pywebview) installed as `~/Applications/VDX OpenAgent.app`
 
 ## Requirements
 
@@ -26,7 +26,7 @@ cd vdx-agent
 ollama pull qwen2.5:7b          # or pick a model in the welcome guide
 ```
 
-Open **VDX Agent** from `~/Applications` or Spotlight. The first launch opens a
+Open **VDX OpenAgent** from `~/Applications` or Spotlight. The first launch opens a
 short welcome guide that checks Ollama, picks a model and turns on connectors.
 
 To uninstall, run `./scripts/uninstall.sh`.

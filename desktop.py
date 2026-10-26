@@ -1,5 +1,5 @@
 """
-VDX Agent — desktop app
+VDX OpenAgent — desktop app
 =======================
 Opens VDX in its own native macOS window (WebKit via pywebview), like a
 regular app. The agent backend runs inside the same process and stops when

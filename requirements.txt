@@ -1,4 +1,4 @@
-# VDX Agent — Python API Dependencies
+# VDX OpenAgent — Python API Dependencies
 # Requires Python 3.10+ (tested on Apple Silicon / macOS)
 
 # HTTP API

@@ -1,5 +1,5 @@
 /**
- * Client for the VDX Agent FastAPI backend (default :8741).
+ * Client for the VDX OpenAgent FastAPI backend (default :8741).
  */
 
 // Dev (`pnpm dev` on :3000) talks to the API on :8741; the packaged app is

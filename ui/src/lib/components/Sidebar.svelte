@@ -64,7 +64,7 @@
   <div class="flex h-14 items-center justify-between px-3">
     <a href="/" class="flex items-center gap-2.5 px-1">
       <span class="logo-tile h-6 w-6"><img src="/brand/vdx-mark.png" alt="" /></span>
-      <span class="text-[15px] font-semibold">VDX Agent</span>
+      <span class="text-[15px] font-semibold">VDX OpenAgent</span>
     </a>
     <button class="nav-item !p-1.5" title="Close sidebar" onclick={() => (collapsed = true)}>{@render icon(I.panel)}</button>
   </div>

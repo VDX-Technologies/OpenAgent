@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# VDX Agent — one-shot installer (macOS)
-# Creates a venv, builds the web UI, and installs the native "VDX Agent.app"
+# VDX OpenAgent — one-shot installer (macOS)
+# Creates a venv, builds the web UI, and installs the native "VDX OpenAgent.app"
 # window in ~/Applications. Pass --autostart to also launch VDX at login (launchd).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP="$HOME/Applications/VDX Agent.app"
+APP="$HOME/Applications/VDX OpenAgent.app"
 PLIST="$HOME/Library/LaunchAgents/ai.vdx.agent.plist"
 PORT=8741
 cd "$ROOT"
@@ -28,16 +28,16 @@ fi
 
 echo "▸ App bundle → $APP"
 mkdir -p "$HOME/Applications" data
-rm -rf "$APP"
+rm -rf "$APP" "$HOME/Applications/VDX Agent.app"  # also drop the pre-rename bundle
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cat > "$APP/Contents/Info.plist" <<PL
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleName</key><string>VDX Agent</string>
-  <key>CFBundleDisplayName</key><string>VDX Agent</string>
+  <key>CFBundleName</key><string>VDX OpenAgent</string>
+  <key>CFBundleDisplayName</key><string>VDX OpenAgent</string>
   <key>CFBundleIdentifier</key><string>ai.vdx.agent.app</string>
-  <key>CFBundleExecutable</key><string>VDX Agent</string>
+  <key>CFBundleExecutable</key><string>VDX OpenAgent</string>
   <key>CFBundleIconFile</key><string>vdx</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleVersion</key><string>1.0</string>
@@ -47,7 +47,7 @@ cat > "$APP/Contents/Info.plist" <<PL
   <key>NSAppleEventsUsageDescription</key><string>VDX controls Calendar, Reminders and Mail on your behalf.</string>
 </dict></plist>
 PL
-cat > "$APP/Contents/MacOS/VDX Agent" <<SH
+cat > "$APP/Contents/MacOS/VDX OpenAgent" <<SH
 #!/bin/bash
 # Native VDX window (pywebview). Starts Ollama if it is not running.
 # Launch errors go to ~/Library/Logs/VDX.log (readable even if Desktop access is denied).
@@ -57,7 +57,7 @@ pgrep -x ollama >/dev/null || open -ga Ollama 2>/dev/null || (nohup ollama serve
 cd "$ROOT" || { echo "cannot access $ROOT (grant Files & Folders access)"; exit 1; }
 exec "$ROOT/.venv/bin/python" desktop.py
 SH
-chmod +x "$APP/Contents/MacOS/VDX Agent"
+chmod +x "$APP/Contents/MacOS/VDX OpenAgent"
 ICON_SRC="ui/static/brand/vdx-dock.png"
 if [ -f "$ICON_SRC" ]; then
   SET="$(mktemp -d)/vdx.iconset"; mkdir -p "$SET"
@@ -90,4 +90,4 @@ PL
   launchctl load "$PLIST"
 fi
 
-echo "✓ Done — open \"VDX Agent\" from ~/Applications (or Spotlight) — it opens its own window."
+echo "✓ Done — open \"VDX OpenAgent\" from ~/Applications (or Spotlight) — it opens its own window."

@@ -1,7 +1,7 @@
 """
 Interface · Discord Bot
 =======================
-Async Discord bot that lets the user control VDX Agent
+Async Discord bot that lets the user control VDX OpenAgent
 remotely (e.g. from an iPhone Discord client).
 
 Commands (prefix configurable, default ``!``):
@@ -62,7 +62,7 @@ class VDXDiscordBot(commands.Bot):
         await self.change_presence(
             activity=discord.Activity(
                 type=discord.ActivityType.watching,
-                name="VDX Agent",
+                name="VDX OpenAgent",
             )
         )
 
@@ -76,12 +76,12 @@ class VDXDiscordBot(commands.Bot):
 
     async def _deny(self, ctx: commands.Context) -> None:
         """Reply with an access-denied message."""
-        await ctx.reply("⛔ You are not authorised to control VDX Agent.")
+        await ctx.reply("⛔ You are not authorised to control VDX OpenAgent.")
 
     # ── Commands ─────────────────────────────────────────────────────
 
     async def cmd_ask(self, ctx: commands.Context, *, message: str) -> None:
-        """Send a message to VDX Agent.
+        """Send a message to VDX OpenAgent.
 
         Usage: ``!ask Remind me to buy milk tomorrow at 9am``
         """
@@ -114,7 +114,7 @@ class VDXDiscordBot(commands.Bot):
         history_len = len(self.agent.memory.get_context())
 
         status = (
-            f"**VDX Agent — Status**\n"
+            f"**VDX OpenAgent — Status**\n"
             f"• Ollama: {'🟢 online' if ollama_ok else '🔴 offline'}\n"
             f"• Model: `{model}`\n"
             f"• Short-term messages: {history_len}\n"

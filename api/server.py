@@ -28,6 +28,7 @@ from core.agent import Agent
 from core.llm import OllamaClient
 from core.memory import MemoryManager
 from core.telemetry_share import TelemetryShare
+from api import __version__, updater
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +89,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="VDX OpenAgent API",
-    version="1.0.0",
+    version=__version__,
     lifespan=lifespan,
 )
 
@@ -186,7 +187,19 @@ def _require_agent() -> Agent:
 @app.get("/api/health")
 def health() -> dict[str, str]:
     """Liveness probe."""
-    return {"status": "ok", "service": "vdx-agent"}
+    return {"status": "ok", "service": "vdx-agent", "version": __version__}
+
+
+@app.get("/api/update")
+def update_status() -> dict:
+    """Installed version vs. the newest release tag on the git remote."""
+    return updater.check()
+
+
+@app.post("/api/update")
+def update_apply() -> dict:
+    """Download and build the newest release; takes effect after a restart."""
+    return updater.apply()
 
 
 @app.get("/api/status", response_model=StatusResponse)
@@ -604,4 +617,5 @@ if _UI is not None:
         f = (_UI / path).resolve()
         if path and f.is_file() and f.is_relative_to(_UI):
             return FileResponse(f)
-        return FileResponse(_UI / "index.html")
+        # never cache the shell, so a rebuilt UI shows up on the next launch
+        return FileResponse(_UI / "index.html", headers={"Cache-Control": "no-store"})

@@ -382,3 +382,26 @@ export type Note = { id: number; title: string; text: string; conversation_id: n
 
 /** In-app notifications (automation results) newer than `after`. */
 export const getNotifications = (after = 0) => request<{ items: Note[] }>(`/api/notifications?after=${after}`);
+
+export type UpdateInfo = {
+  current: string;
+  latest: string | null;
+  available: boolean;
+  running: boolean;
+  done: boolean;
+  error: string;
+};
+
+/** Installed version and the newest release on the git remote. */
+export async function getUpdate(): Promise<UpdateInfo> {
+  const r = await fetch(`${API_BASE}/api/update`);
+  if (!r.ok) throw new Error(`update check failed (${r.status})`);
+  return r.json();
+}
+
+/** Download and build the newest release in the background. */
+export async function applyUpdate(): Promise<UpdateInfo> {
+  const r = await fetch(`${API_BASE}/api/update`, { method: "POST" });
+  if (!r.ok) throw new Error(`update failed (${r.status})`);
+  return r.json();
+}

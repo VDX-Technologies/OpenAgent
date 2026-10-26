@@ -63,7 +63,7 @@ def _wait_ready(window) -> None:
     """Swap the splash for the real UI once the backend answers."""
     for _ in range(120):
         if _healthy():
-            window.load_url(URL)
+            window.load_url(f"{URL}/?desktop")
             return
         time.sleep(0.25)
     window.load_html(_SPLASH.replace("Starting…", "Could not start the agent — see data/vdx.log"))

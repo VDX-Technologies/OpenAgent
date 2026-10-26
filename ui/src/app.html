@@ -8,6 +8,10 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
     <title>VDX OpenAgent</title>
+    <script>
+      // native app (desktop.py opens /?desktop): leave room for the traffic lights
+      try { if (location.search.includes("desktop") || sessionStorage.vdxDesktop) { sessionStorage.vdxDesktop = 1; document.documentElement.classList.add("desktop"); } } catch {}
+    </script>
     %sveltekit.head%
   </head>
   <body class="antialiased" data-sveltekit-preload-data="hover">

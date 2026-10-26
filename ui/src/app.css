@@ -1,0 +1,344 @@
+@import "tailwindcss";
+
+:root {
+  /* Neutral, OpenWebUI-like palette; follows the system light/dark setting. */
+  --bg: #ffffff;
+  --bg-elevated: #f9f9f9;
+  --bg-panel: #ffffff;
+  --bg-hover: #ececec;
+  --border: #e5e5e5;
+  --border-strong: #d4d4d4;
+  --text: #0d0d0d;
+  --text-muted: #5d5d5d;
+  --text-dim: #8f8f8f;
+  --accent: #0d0d0d;
+  --accent-dim: rgba(0, 0, 0, 0.05);
+  --accent-text: #ffffff;
+  --user-bg: #f0f0f0;
+  --code-bg: #f6f6f6;
+  --danger: #d93636;
+  --ok: #16a34a;
+  --warn: #c27c0e;
+  --font-archivo: "Inter", ui-sans-serif, -apple-system, system-ui, sans-serif;
+  --font-plex-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #171717;
+    --bg-elevated: #0d0d0d;
+    --bg-panel: #212121;
+    --bg-hover: #262626;
+    --border: #2a2a2a;
+    --border-strong: #3a3a3a;
+    --text: #ececec;
+    --text-muted: #a3a3a3;
+    --text-dim: #6e6e6e;
+    --accent: #ececec;
+    --accent-dim: rgba(255, 255, 255, 0.06);
+    --accent-text: #0d0d0d;
+    --user-bg: #2a2a2a;
+    --code-bg: #0d0d0d;
+    --danger: #f87171;
+    --ok: #4ade80;
+    --warn: #e2a04a;
+  }
+  .logo-tile img { filter: invert(1); }
+}
+
+@theme inline {
+  --color-background: var(--bg);
+  --color-foreground: var(--text);
+  --font-sans: var(--font-archivo);
+  --font-mono: var(--font-plex-mono);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-archivo), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+:focus-visible {
+  outline: 2px solid var(--border-strong);
+  outline-offset: 3px;
+}
+
+/* the composer box already shows focus; no inner rectangle on its textarea */
+textarea:focus-visible { outline: none; }
+
+.wordmark {
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.eyebrow {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.app-shell { background: var(--bg); }
+
+/* Markdown in bubbles */
+.prose-vdx {
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.prose-vdx p {
+  margin: 0.4em 0;
+}
+
+.prose-vdx p:first-child {
+  margin-top: 0;
+}
+
+.prose-vdx p:last-child {
+  margin-bottom: 0;
+}
+
+.prose-vdx code {
+  font-family: var(--font-plex-mono), ui-monospace, monospace;
+  font-size: 0.85em;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.1em 0.35em;
+}
+
+.prose-vdx pre {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.9rem 1rem;
+  overflow-x: auto;
+  margin: 0.75rem 0;
+}
+
+.prose-vdx pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.82rem;
+}
+
+.prose-vdx ul,
+.prose-vdx ol {
+  margin: 0.5em 0;
+  padding-left: 1.25rem;
+}
+
+.prose-vdx a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.prose-vdx strong {
+  font-weight: 650;
+  color: var(--text);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ── Motion system ─────────────────────────────────────────────────
+   One easing curve, short durations: things feel instant but never jump. */
+:root {
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 120ms;
+  --dur: 200ms;
+  --dur-slow: 320ms;
+}
+
+/* Every Tailwind `transition` uses the house curve. */
+.transition,
+.transition-all,
+.transition-colors,
+.transition-opacity {
+  transition-duration: var(--dur);
+  transition-timing-function: var(--ease);
+}
+
+button,
+a,
+input,
+textarea,
+select {
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease),
+    opacity var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease),
+    transform var(--dur-fast) var(--ease);
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:not(:disabled):active {
+  transform: scale(0.97);
+}
+
+@keyframes vdx-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes vdx-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Route change: whole view eases in. */
+main > * {
+  animation: vdx-fade var(--dur-slow) var(--ease) both;
+}
+
+/* New chat message. */
+.msg-in {
+  animation: vdx-rise var(--dur-slow) var(--ease) both;
+}
+
+/* Panels / cards cascade in on page load. */
+section,
+.cascade > * {
+  animation: vdx-rise var(--dur-slow) var(--ease) both;
+}
+.cascade > *:nth-child(2), section:nth-of-type(2) { animation-delay: 40ms; }
+.cascade > *:nth-child(3), section:nth-of-type(3) { animation-delay: 80ms; }
+.cascade > *:nth-child(4), section:nth-of-type(4) { animation-delay: 120ms; }
+.cascade > *:nth-child(n + 5), section:nth-of-type(n + 5) { animation-delay: 160ms; }
+
+/* "Thinking" shimmer instead of blinking dots. */
+.shimmer {
+  background: linear-gradient(90deg, var(--text-dim) 0%, var(--text) 50%, var(--text-dim) 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: vdx-shimmer 1.6s linear infinite;
+}
+@keyframes vdx-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+/* Popovers / menus. */
+[role="menu"],
+[role="listbox"],
+[role="dialog"],
+.vdx-popover {
+  animation: vdx-pop var(--dur) var(--ease) both;
+  transform-origin: bottom left;
+}
+@keyframes vdx-pop {
+  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Quiet, thin scrollbars. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: var(--border); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+*::-webkit-scrollbar-thumb:hover { background-color: var(--border-strong); }
+
+html { text-rendering: optimizeLegibility; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+/* First-boot intro */
+.onb-in { animation: vdx-fade var(--dur-slow) var(--ease) both; }
+.onb-in > [role="dialog"] { animation: vdx-pop 420ms var(--ease) both; transform-origin: center; }
+.onb-out { animation: vdx-fade 240ms var(--ease) reverse both; }
+
+.field {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  padding: 0.65rem 0.85rem;
+  font-size: 13.5px;
+  outline: none;
+}
+.field:focus { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
+.ghost-btn {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.3rem 0.65rem;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.ghost-btn:hover { color: var(--text); background: var(--bg-hover); }
+.label { display: block; margin-bottom: 0.35rem; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); }
+
+/* Brand mark on a solid tile (white mark, inverted in dark mode). */
+.logo-tile { display: inline-flex; align-items: center; justify-content: center; background: var(--text); border-radius: 7px; flex-shrink: 0; }
+.logo-tile img { height: 62%; width: auto; object-fit: contain; }
+.nav-item { display: flex; align-items: center; gap: 0.6rem; border-radius: 8px; padding: 0.4rem 0.6rem; font-size: 13.5px; color: var(--text); }
+.nav-item:hover, .nav-item.on { background: var(--bg-hover); }
+.nav-item svg { width: 16px; height: 16px; flex-shrink: 0; color: var(--text-muted); }
+
+/* sidebar: a chat whose reply is still being generated */
+.run-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 7px;
+  vertical-align: middle;
+  border-radius: 9999px;
+  background: var(--accent);
+  animation: run-pulse 1.1s var(--ease) infinite;
+}
+@keyframes run-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.75); }
+  50% { opacity: 1; transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) { .run-dot { animation: none; } }
+
+/* native app without a title bar: traffic lights sit over the sidebar */
+.titlebar-strip { display: none; }
+html.desktop .titlebar-strip { display: block; position: fixed; inset: 0 0 auto 0; height: 28px; z-index: 40; }
+html.desktop aside { padding-top: 28px; }

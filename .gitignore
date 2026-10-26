@@ -1,0 +1,43 @@
+# Environment & secrets
+.env
+ui/.env
+ui/.env.*
+!ui/.env.example
+*.pem
+credentials.json
+token.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+
+# Node / SvelteKit
+node_modules/
+ui/.svelte-kit/
+ui/build/
+
+# SQLite memory DB
+data/
+*.db
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+.claude/
+
+# Logs
+*.log
+
+# Local agent notes
+CLAUDE.md

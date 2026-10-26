@@ -394,6 +394,8 @@ export type UpdateInfo = {
   running: boolean;
   done: boolean;
   error: string;
+  step: string;
+  notes: string;
 };
 
 /** Installed version and the newest release on the git remote. */
@@ -401,6 +403,17 @@ export async function getUpdate(): Promise<UpdateInfo> {
   const r = await fetch(`${API_BASE}/api/update`);
   if (!r.ok) throw new Error(`update check failed (${r.status})`);
   return r.json();
+}
+
+/** Restart the app after an update; resolves once the new version answers. */
+export async function restartApp(): Promise<void> {
+  await fetch(`${API_BASE}/api/update/restart`, { method: "POST" }).catch(() => {});
+  await new Promise((r) => setTimeout(r, 1500));
+  for (let i = 0; i < 60; i++) {
+    if (await fetch(`${API_BASE}/api/health`).then((r) => r.ok).catch(() => false)) return;
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error("The app did not come back — reopen it");
 }
 
 /** Download and build the newest release in the background. */

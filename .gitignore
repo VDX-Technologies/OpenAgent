@@ -23,6 +23,10 @@ env/
 node_modules/
 ui/.svelte-kit/
 ui/build/
+ui/build.old/
+
+# Self-update scratch worktree
+.update/
 
 # SQLite memory DB
 data/

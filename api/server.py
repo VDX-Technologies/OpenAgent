@@ -230,6 +230,12 @@ def update_apply() -> dict:
     return updater.apply()
 
 
+@app.post("/api/update/restart")
+def update_restart() -> dict:
+    """Restart the app so an installed update runs."""
+    return updater.restart()
+
+
 @app.get("/api/status", response_model=StatusResponse)
 def status() -> StatusResponse:
     """Return Ollama / integrations status for the UI header."""

@@ -61,6 +61,15 @@ main.py       entry point (port 8741)
 All settings live in `.env` (see `.env.example`) and can be edited in
 **Settings** in the app. `.env` is git-ignored and never leaves your Mac.
 
+## Updates and releases
+
+The app checks the repo for a newer release at launch and every 6 hours. To ship one, publish a
+GitHub release (or push a tag) named `X.Y.Z` or `vX.Y.Z` on `main`; the tag is the version, so
+nothing else needs bumping. Clicking **Update** builds the release in a temporary folder first,
+then swaps it in (local edits to tracked files are discarded, `.env` and `data/` are kept) and
+**Restart now** relaunches the app. If the build fails, the installed version is left untouched.
+For a private repo, add a GitHub token in Settings so the app can see new releases.
+
 ## Privacy and telemetry
 
 The app asks once whether you want to share **anonymous performance data**.

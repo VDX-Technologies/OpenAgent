@@ -1,7 +1,7 @@
 """
 Tool · Web
 ==========
-Read web pages and search the web, stdlib only (urllib + html.parser).
+Read web pages and search the web (httpx + html.parser).
 Used both as agent tools and to inline pages attached to a chat message.
 """
 
@@ -10,8 +10,9 @@ from __future__ import annotations
 import logging
 import re
 import urllib.parse
-import urllib.request
 from html.parser import HTMLParser
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -62,18 +63,24 @@ def _get(url: str, timeout: int = 15) -> tuple[str, str]:
     """GET *url*; returns (content-type, decoded body). Only http(s) is allowed."""
     if urllib.parse.urlparse(url).scheme not in ("http", "https"):
         raise ValueError("only http(s) URLs are supported")
-    req = urllib.request.Request(url, headers={"User-Agent": _UA, "Accept-Language": "en,*;q=0.5"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        ctype = r.headers.get("Content-Type", "")
-        body = r.read(3_000_000)
-        charset = r.headers.get_content_charset() or "utf-8"
+    headers = {"User-Agent": _UA, "Accept-Language": "en,*;q=0.5"}
+    with httpx.Client(timeout=timeout, follow_redirects=True, headers=headers) as client:
+        with client.stream("GET", url) as r:
+            r.raise_for_status()
+            body = b""
+            for chunk in r.iter_bytes():
+                body += chunk
+                if len(body) >= 3_000_000:
+                    break
+            ctype = r.headers.get("Content-Type", "")
+            charset = r.charset_encoding or "utf-8"
     return ctype, body.decode(charset, errors="replace")
 
 
 def fetch_url(url: str, max_chars: int = MAX_CHARS) -> str:
     """Return the title and readable text of a web page (truncated to *max_chars*)."""
     url = url.strip()
-    if not re.match(r"https?://", url):
+    if not re.match(r"[a-z][a-z0-9+.-]*://", url, re.I):
         url = "https://" + url
     try:
         ctype, body = _get(url)

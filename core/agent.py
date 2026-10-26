@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 
 # Maximum tool-call rounds before forcing a text reply
 MAX_TOOL_ROUNDS = 15  # coding tasks chain read → edit → commit → push
+REPLY_TOKENS = 1024  # context kept free for the model's answer
+CHARS_PER_TOKEN = 3.5  # conservative estimate, so the prompt is never cut by Ollama
 
 SYSTEM_PROMPT = """\
 You are VDX OpenAgent — a sharp, capable local assistant for macOS \
@@ -46,7 +48,7 @@ Never explain to the user how to call a tool or show tool calls as code — you 
 - To message someone by name, call find_contact first to get their number/email.
 - Before sending messages or emails on the user's behalf, make sure recipient and text are clear.
 - Coding: list_files/read_file before editing; prefer edit_file for small changes; check git_diff before committing; commit and push only when the user asks.
-- Current date/time: {now}
+- Today is {today}. The current time is given at the start of the user's latest message.
 {facts}
 """
 
@@ -105,7 +107,8 @@ class Agent:
         active = connectors.active_connectors()
         content = SYSTEM_PROMPT.format(
             connectors="\n".join(f"- {c.name}: {c.description}" for c in active) or "- none",
-            now=datetime.now().strftime("%Y-%m-%d %H:%M"),
+            # date only: a prompt that changes every minute defeats Ollama's prompt cache
+            today=datetime.now().strftime("%A %Y-%m-%d"),
             facts=facts,
         )
         return {"role": "system", "content": content}
@@ -194,15 +197,36 @@ class Agent:
         self.memory.add_message("user", user_message, source=source, conversation_id=conversation_id)
         self._tools_now, schemas = self._active_tools()
         messages = [self._system_message(), *self.memory.get_context(conversation_id)]
-        if (context or images) and messages[-1].get("role") == "user":
-            turn = {**messages[-1]}
+        if messages[-1].get("role") == "user":
+            turn = {**messages[-1], "content": f"[{datetime.now():%H:%M}] {messages[-1]['content']}"}
             if context:
                 turn["content"] = f"{context}\n\n---\n\n{turn['content']}"
             if images:
                 turn["images"] = images
             messages[-1] = turn
+        self._fit(messages, schemas)
         self._trace = Trace(self.llm.model, source, len(messages), sum(len(m.get("content") or "") for m in messages), len(schemas))
         return messages, schemas
+
+    def _fit(self, messages: list[dict[str, Any]], schemas: list[dict[str, Any]]) -> None:
+        """Trim *messages* in place to fit the model's context window.
+
+        Ollama silently drops the start of a prompt that is too long, which loses the
+        system prompt. Instead the oldest history goes first, then the start of the
+        current turn (its attached pages/chats) is shortened.
+        """
+        num_ctx = getattr(self.llm, "num_ctx", 8192)
+        budget = int((num_ctx - REPLY_TOKENS) * CHARS_PER_TOKEN) - len(json.dumps(schemas))
+        size = lambda m: len(m.get("content") or "")  # noqa: E731
+        total = sum(map(size, messages))
+        while total > budget and len(messages) > 2:
+            total -= size(messages.pop(1))
+        while len(messages) > 2 and messages[1].get("role") == "tool":  # no orphaned tool results
+            total -= size(messages.pop(1))
+        if total > budget:
+            last = messages[-1]
+            keep = max(budget - (total - size(last)), 2000)
+            last["content"] = "…(start of the attached content cut to fit the model's context)\n" + last["content"][-keep:]
 
     def _handle_tools(self, reply: dict[str, Any], messages: list[dict[str, Any]], source: str, conversation_id: int | None) -> int:
         """Run every tool call in *reply*, appending results; return how many ran."""

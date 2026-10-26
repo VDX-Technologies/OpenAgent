@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import nullcontext
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
@@ -18,6 +19,7 @@ import httpx
 from config.settings import get_settings
 
 logger = logging.getLogger(__name__)
+_AUTO_CTX: int | None = None
 
 
 def _with_usage(data: dict[str, Any]) -> dict[str, Any]:
@@ -48,6 +50,34 @@ class OllamaClient:
         self.model = cfg.model
         self.temperature = cfg.temperature
         self.timeout = cfg.timeout
+        self._http: httpx.Client | None = None
+
+    @property
+    def keep_alive(self) -> str:
+        return get_settings().ollama.keep_alive or "30m"
+
+    @property
+    def num_ctx(self) -> int:
+        """Context window sent to Ollama: the setting, or 16K tokens on 32 GB+ Macs and 8K below."""
+        if (n := get_settings().ollama.num_ctx) > 0:
+            return n
+        global _AUTO_CTX
+        if _AUTO_CTX is None:
+            try:
+                from core.hardware import _ram_bytes
+                _AUTO_CTX = 16384 if _ram_bytes() >= 32 * 1024**3 else 8192
+            except Exception:
+                _AUTO_CTX = 8192
+        return _AUTO_CTX
+
+    def _options(self, temperature: float | None = None) -> dict[str, Any]:
+        return {"temperature": temperature or self.temperature, "num_ctx": self.num_ctx}
+
+    def _session(self) -> httpx.Client:
+        """One pooled HTTP client for the sync calls (reconnecting per request costs time)."""
+        if self._http is None or self._http.timeout.read != self.timeout:
+            self._http = httpx.Client(timeout=self.timeout)
+        return self._http
 
     # ── Health check ─────────────────────────────────────────────────
 
@@ -172,13 +202,14 @@ class OllamaClient:
             "model": model or self.model,
             "messages": messages,
             "stream": False,
-            "options": {"temperature": temperature or self.temperature},
+            "options": self._options(temperature),
+            "keep_alive": self.keep_alive,
         }
         if tools:
             payload["tools"] = tools
 
         try:
-            with httpx.Client(timeout=self.timeout) as client:
+            with nullcontext(self._session()) as client:
                 resp = client.post(
                     f"{self.base_url}/api/chat",
                     json=payload,
@@ -208,11 +239,12 @@ class OllamaClient:
             "model": self.model,
             "messages": messages,
             "stream": True,
-            "options": {"temperature": temperature or self.temperature},
+            "options": self._options(temperature),
+            "keep_alive": self.keep_alive,
         }
 
         try:
-            with httpx.Client(timeout=self.timeout) as client:
+            with nullcontext(self._session()) as client:
                 with client.stream(
                     "POST",
                     f"{self.base_url}/api/chat",
@@ -251,13 +283,14 @@ class OllamaClient:
             "model": model or self.model,
             "messages": messages,
             "stream": True,
-            "options": {"temperature": self.temperature},
+            "options": self._options(),
+            "keep_alive": self.keep_alive,
         }
         if tools:
             payload["tools"] = tools
         content, calls, last = "", [], {}
         try:
-            with httpx.Client(timeout=self.timeout) as client:
+            with nullcontext(self._session()) as client:
                 with client.stream("POST", f"{self.base_url}/api/chat", json=payload) as resp:
                     resp.raise_for_status()
                     for line in resp.iter_lines():
@@ -292,7 +325,8 @@ class OllamaClient:
             "model": self.model,
             "messages": messages,
             "stream": True,
-            "options": {"temperature": temperature or self.temperature},
+            "options": self._options(temperature),
+            "keep_alive": self.keep_alive,
         }
 
         try:
@@ -331,7 +365,8 @@ class OllamaClient:
             "model": model or self.model,
             "messages": messages,
             "stream": False,
-            "options": {"temperature": temperature or self.temperature},
+            "options": self._options(temperature),
+            "keep_alive": self.keep_alive,
         }
         if tools:
             payload["tools"] = tools

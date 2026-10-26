@@ -36,6 +36,10 @@ class OllamaConfig:
         default_factory=lambda: float(_env("OLLAMA_TEMPERATURE", "0.7"))
     )
     timeout: int = field(default_factory=lambda: int(_env("OLLAMA_TIMEOUT", "120")))
+    # context window in tokens; 0 = pick from the Mac's RAM (Ollama's own default is too small)
+    num_ctx: int = field(default_factory=lambda: int(_env("OLLAMA_NUM_CTX", "0") or 0))
+    # how long Ollama keeps the model loaded after a request (its default, 5m, means slow reloads)
+    keep_alive: str = field(default_factory=lambda: _env("OLLAMA_KEEP_ALIVE", "30m"))
 
 
 @dataclass

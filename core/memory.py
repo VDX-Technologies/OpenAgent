@@ -23,7 +23,8 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 # How many recent turns to keep in the short-term window sent to the LLM
-SHORT_TERM_LIMIT = 20
+SHORT_TERM_LIMIT = 20  # user/assistant messages of history given to the model
+TOOL_CONTEXT_CHARS = 600  # old tool results are shortened in that history
 
 
 class MemoryManager:
@@ -40,6 +41,10 @@ class MemoryManager:
 
         self._conn = sqlite3.connect(path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+        # WAL + NORMAL sync: commits (one per message) don't wait for a full disk flush
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._conn.execute("PRAGMA busy_timeout=5000")
         self._create_tables()
 
         # In-memory rolling window of the current conversation
@@ -147,15 +152,31 @@ class MemoryManager:
         self._conn.commit()
 
     def get_context(self, conversation_id: int | None = None) -> list[dict[str, Any]]:
-        """Return the recent window for a conversation (or the global one)."""
+        """Return the recent window for a conversation (or the global one).
+
+        The window holds the last ``SHORT_TERM_LIMIT`` user/assistant messages plus the
+        tool results between them, shortened: a fetched page or file shouldn't be
+        re-sent in full on every later turn.
+        """
         if conversation_id is None:
-            return list(self._short_term)
-        rows = self._conn.execute(
-            "SELECT role, content FROM messages WHERE conversation_id = ? "
-            "ORDER BY id DESC LIMIT ?",
-            (conversation_id, SHORT_TERM_LIMIT),
-        ).fetchall()
-        return [{"role": r["role"], "content": r["content"]} for r in reversed(rows)]
+            rows = self._short_term
+        else:
+            start = self._conn.execute(
+                "SELECT id FROM messages WHERE conversation_id = ? AND role IN ('user','assistant') "
+                "ORDER BY id DESC LIMIT 1 OFFSET ?",
+                (conversation_id, SHORT_TERM_LIMIT - 1),
+            ).fetchone()
+            rows = self._conn.execute(
+                "SELECT role, content FROM messages WHERE conversation_id = ? AND id >= ? ORDER BY id",
+                (conversation_id, start["id"] if start else 0),
+            ).fetchall()
+        out = []
+        for r in rows:
+            content = r["content"]
+            if r["role"] == "tool" and len(content) > TOOL_CONTEXT_CHARS:
+                content = content[:TOOL_CONTEXT_CHARS] + "…(shortened)"
+            out.append({"role": r["role"], "content": content})
+        return out
 
     # ── Conversations ────────────────────────────────────────────────
 

@@ -94,7 +94,11 @@ def main() -> None:
         text_select=True,
     )
     window.events.shown += lambda: _hide_titlebar(window)
-    webview.start(_wait_ready, window)
+    # pywebview defaults to private mode, which forgets cookies/localStorage on quit
+    # (the intro, consent and model choice would come back on every launch)
+    data = Path.home() / ".vdx-agent" / "webview"
+    data.mkdir(parents=True, exist_ok=True)
+    webview.start(_wait_ready, window, private_mode=False, storage_path=str(data))
 
 
 def _hide_titlebar(window) -> None:

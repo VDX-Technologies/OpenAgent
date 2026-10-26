@@ -181,12 +181,26 @@ class Agent:
 
     # ── Main entry points ────────────────────────────────────────────
 
-    def _begin(self, user_message: str, source: str, conversation_id: int | None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        """Persist the user turn and build the initial message list + tool schemas."""
+    def _begin(
+        self, user_message: str, source: str, conversation_id: int | None,
+        context: str = "", images: list[str] | None = None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Persist the user turn and build the initial message list + tool schemas.
+
+        *context* (attached pages / chats) and *images* (base64) are given to the
+        model with this turn only; the stored message keeps just the user's text.
+        """
         self._set_state("thinking")
         self.memory.add_message("user", user_message, source=source, conversation_id=conversation_id)
         self._tools_now, schemas = self._active_tools()
         messages = [self._system_message(), *self.memory.get_context(conversation_id)]
+        if (context or images) and messages[-1].get("role") == "user":
+            turn = {**messages[-1]}
+            if context:
+                turn["content"] = f"{context}\n\n---\n\n{turn['content']}"
+            if images:
+                turn["images"] = images
+            messages[-1] = turn
         self._trace = Trace(self.llm.model, source, len(messages), sum(len(m.get("content") or "") for m in messages), len(schemas))
         return messages, schemas
 
@@ -274,13 +288,15 @@ class Agent:
         source: str = "gui",
         model: str | None = None,
         conversation_id: int | None = None,
+        context: str = "",
+        images: list[str] | None = None,
     ) -> str:
         """Process a user message synchronously (web/GUI path).
 
         Runs the tool-calling loop and returns the final assistant reply.
         Token usage of the whole request is stored in ``self.last_usage``.
         """
-        messages, schemas = self._begin(user_message, source, conversation_id)
+        messages, schemas = self._begin(user_message, source, conversation_id, context, images)
         stats = self._new_stats()
 
         for _round in range(MAX_TOOL_ROUNDS):
@@ -329,6 +345,8 @@ class Agent:
         source: str = "web",
         model: str | None = None,
         conversation_id: int | None = None,
+        context: str = "",
+        images: list[str] | None = None,
     ) -> Iterator[dict[str, Any]]:
         """Like :meth:`process`, but yields UI events as they happen.
 
@@ -337,7 +355,7 @@ class Agent:
         text so far is discarded by the UI), and finally
         ``{"type": "done", "reply", "usage"}``.
         """
-        messages, schemas = self._begin(user_message, source, conversation_id)
+        messages, schemas = self._begin(user_message, source, conversation_id, context, images)
         stats = self._new_stats()
         for _round in range(MAX_TOOL_ROUNDS + 1):
             last = _round == MAX_TOOL_ROUNDS

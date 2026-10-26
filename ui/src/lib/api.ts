@@ -110,6 +110,9 @@ export type StreamEvent =
   | { type: "done"; reply: string; conversation_id: number | null; usage: Usage }
   | { type: "error"; detail: string };
 
+/** Extra context sent with one message: data-URL images, web pages, referenced chats. */
+export type Attachments = { images?: string[]; urls?: string[]; ref_conversations?: number[] };
+
 /** Stream a chat turn (SSE): tokens as they are generated, tool calls, then the final reply. */
 export async function streamChat(
   message: string,
@@ -117,11 +120,12 @@ export async function streamChat(
   model?: string,
   conversationId?: number | null,
   signal?: AbortSignal,
+  attachments?: Attachments,
 ) {
   const res = await fetch(`${API_BASE}/api/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, source: "web", model: model || null, conversation_id: conversationId ?? null }),
+    body: JSON.stringify({ message, source: "web", model: model || null, conversation_id: conversationId ?? null, ...attachments }),
     signal,
   });
   if (!res.ok || !res.body) throw new Error(res.statusText || "Stream failed");

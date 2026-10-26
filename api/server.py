@@ -29,6 +29,7 @@ from core.llm import OllamaClient
 from core.memory import MemoryManager
 from core.telemetry_share import TelemetryShare
 from api import __version__, updater
+from tools import web
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,30 @@ class ChatRequest(BaseModel):
     source: str = "web"
     model: str | None = None
     conversation_id: int | None = None
+    images: list[str] = Field(default_factory=list, max_length=4)  # base64 or data: URLs
+    urls: list[str] = Field(default_factory=list, max_length=5)  # pages to read with this message
+    ref_conversations: list[int] = Field(default_factory=list, max_length=5)  # chats to use as context
+
+
+def _attachments(body: ChatRequest, a: Any) -> tuple[str, list[str], str]:
+    """Turn a request's attachments into (model context, images, note for the stored message)."""
+    parts: list[str] = []
+    note: list[str] = []
+    for cid in body.ref_conversations:
+        conv = a.memory.get_conversation(cid)
+        if not conv:
+            continue
+        lines = [f"{m['role']}: {m['content']}" for m in a.memory.get_conversation_messages(cid)]
+        text = "\n".join(lines)[-8000:]
+        parts.append(f"[Referenced chat \"{conv['title']}\"]\n{text}")
+        note.append(f"💬 {conv['title']}")
+    for url in body.urls:
+        parts.append(f"[Attached web page]\n{web.fetch_url(url, max_chars=8000)}")
+        note.append(f"🔗 {url}")
+    images = [i.split(",", 1)[1] if i.startswith("data:") else i for i in body.images]
+    if images:
+        note.append(f"🖼 {len(images)} image{'s' if len(images) > 1 else ''}")
+    return "\n\n".join(parts), images, "  ".join(note)
 
 
 class ChatResponse(BaseModel):
@@ -230,16 +255,18 @@ def list_models() -> dict[str, list[str]]:
 def chat(body: ChatRequest) -> ChatResponse:
     """Process a user message through the agent (tools + memory)."""
     a = _require_agent()
-    text = body.message.strip()
+    context, images, note = _attachments(body, a)
+    text = body.message.strip() + (f"\n\n{note}" if note else "")
     cid = body.conversation_id
     if cid is not None and not a.memory.get_conversation(cid):
         raise HTTPException(404, "Conversation not found")
     if cid is None and body.source == "web":
-        title = " ".join(text.split())[:60] or "New chat"
+        title = " ".join(body.message.split())[:60] or "New chat"
         cid = a.memory.create_conversation(title)["id"]
     try:
         with _agent_lock:
-            reply = a.process(text, source=body.source, model=body.model or None, conversation_id=cid)
+            reply = a.process(text, source=body.source, model=body.model or None, conversation_id=cid,
+                              context=context, images=images)
             usage = dict(a.last_usage)
     except Exception as exc:
         logger.exception("Chat failed")
@@ -251,19 +278,21 @@ def chat(body: ChatRequest) -> ChatResponse:
 def chat_stream(body: ChatRequest) -> StreamingResponse:
     """Same as ``/api/chat`` but streams Server-Sent Events (token / tool / done)."""
     a = _require_agent()
-    text = body.message.strip()
+    context, images, note = _attachments(body, a)
+    text = body.message.strip() + (f"\n\n{note}" if note else "")
     cid = body.conversation_id
     if cid is not None and not a.memory.get_conversation(cid):
         raise HTTPException(404, "Conversation not found")
     if cid is None and body.source == "web":
-        cid = a.memory.create_conversation(" ".join(text.split())[:60] or "New chat")["id"]
+        cid = a.memory.create_conversation(" ".join(body.message.split())[:60] or "New chat")["id"]
 
     def events() -> Iterator[str]:
         with _agent_lock:
             try:
                 # tell the client its conversation id up front, so it can follow the run anywhere
                 yield f"data: {json.dumps({'type': 'start', 'conversation_id': cid})}\n\n"
-                for ev in a.process_stream(text, source=body.source, model=body.model or None, conversation_id=cid):
+                for ev in a.process_stream(text, source=body.source, model=body.model or None, conversation_id=cid,
+                                             context=context, images=images):
                     if ev["type"] == "done":
                         ev["conversation_id"] = cid
                     yield f"data: {json.dumps(ev)}\n\n"

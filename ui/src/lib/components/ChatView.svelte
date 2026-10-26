@@ -7,6 +7,8 @@
   import { storedModel } from "#lib/ui";
   import MessageBubble from "./MessageBubble.svelte";
   import StatusPill from "./StatusPill.svelte";
+  import AttachMenu, { type Attached } from "./AttachMenu.svelte";
+  import { getUpdate } from "#lib/api";
   import ModelPicker from "./ModelPicker.svelte";
   import ConnectorsMenu from "./ConnectorsMenu.svelte";
 
@@ -93,10 +95,20 @@
     scroller.scrollTo({ top: scroller.scrollHeight, behavior: smooth ? "smooth" : "auto" });
   }
 
+  let attached = $state<Attached[]>([]);
+  let version = $state("");
+  getUpdate().then((u) => (version = u.current)).catch(() => {});
+
   async function send(override?: string) {
     const text = (override ?? input).trim();
     if (!text || busy) return;
     if (override === undefined) input = "";
+    const att = {
+      images: attached.filter((a) => a.kind === "image").map((a) => a.value),
+      urls: attached.filter((a) => a.kind === "url").map((a) => a.value),
+      ref_conversations: attached.filter((a) => a.kind === "chat").map((a) => Number(a.value)),
+    };
+    attached = [];
     error = null;
     messages.push({ role: "user", content: text, created_at: new Date().toISOString() });
     scrollDown(false);
@@ -105,7 +117,7 @@
         created = id; title = text.slice(0, 60);
         replaceState(`/?c=${id}`, {});
       }
-    });
+    }, att);
   }
 
   function retry() {
@@ -146,10 +158,22 @@
   {#if error}<p class="mx-auto mb-2 w-full max-w-3xl text-[12px] text-[var(--danger)]">{error}</p>{/if}
     <form onsubmit={(e) => { e.preventDefault(); send(); }}
       class="mx-auto flex max-w-3xl flex-col gap-1 w-full rounded-3xl border border-[var(--border)] bg-[var(--bg-panel)] p-2.5 shadow-sm transition-colors focus-within:border-[var(--border-strong)]">
+      {#if attached.length}
+        <div class="flex flex-wrap gap-1.5 px-1 pt-1">
+          {#each attached as a, i (a.value + i)}
+            <span class="flex max-w-[240px] items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] py-1 pl-1 pr-2 text-[12px]">
+              {#if a.kind === "image"}<img src={a.value} alt="" class="h-7 w-7 rounded object-cover" />{:else}<span class="pl-1">{a.kind === "url" ? "🔗" : "💬"}</span>{/if}
+              <span class="truncate">{a.label}</span>
+              <button type="button" class="text-[var(--text-dim)] hover:text-[var(--text)]" title="Remove" onclick={() => attached.splice(i, 1)}>×</button>
+            </span>
+          {/each}
+        </div>
+      {/if}
       <textarea bind:this={textarea} bind:value={input} use:autosize onkeydown={onKey} rows="1"
         placeholder="How can I help you today?"
         class="max-h-[200px] min-h-[40px] w-full resize-none bg-transparent px-2 py-2 text-[14px] outline-none placeholder:text-[var(--text-dim)]"></textarea>
       <div class="flex items-center gap-1.5">
+        <AttachMenu bind:items={attached} />
         <ModelPicker bind:value={model} fallback={status?.model} />
         <ConnectorsMenu />
         <div class="flex-1"></div>
@@ -173,6 +197,7 @@
     <h1 class="max-w-[50vw] truncate text-[14px] font-medium text-[var(--text-muted)]">{messages.length ? title : ""}</h1>
     <div class="flex items-center gap-2">
       <StatusPill {status} error={offline} />
+      {#if version}<span class="rounded-full border border-[var(--border)] px-2.5 py-1 font-mono text-[11px] text-[var(--text-muted)]" title="VDX OpenAgent version">v{version}</span>{/if}
       {#if messages.length}<button class="ghost-btn !text-[12px]" onclick={exportMd}>Export</button>{/if}
     </div>
   </header>

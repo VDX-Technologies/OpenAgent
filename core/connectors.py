@@ -17,7 +17,7 @@ from typing import Any, Callable
 
 from config.settings import get_settings, reload_settings, save_settings_to_env
 from tools import apple_calendar, apple_contacts, apple_mail, apple_messages, apple_notes
-from tools import apple_reminders, code_workspace, github_tool, gmail_tool, whatsapp
+from tools import apple_reminders, code_workspace, github_tool, gmail_tool, web, whatsapp
 
 
 @dataclass
@@ -62,6 +62,10 @@ def _gmail_ok() -> bool:
 _MAC = sys.platform == "darwin"
 
 CONNECTORS: list[Connector] = [
+    Connector(
+        "web", "Web", "Search the internet and read web pages.",
+        web.TOOL_DESCRIPTORS, web.TOOLS,
+    ),
     Connector(
         "code", "Code", "Read, edit, commit and push code in a local git repo.",
         code_workspace.TOOL_DESCRIPTORS, code_workspace.TOOLS,

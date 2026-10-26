@@ -8,6 +8,7 @@
   import MessageBubble from "./MessageBubble.svelte";
   import StatusPill from "./StatusPill.svelte";
   import AttachMenu, { type Attached } from "./AttachMenu.svelte";
+  import { Link, MessageSquare, X } from "@lucide/svelte";
   import { getUpdate } from "#lib/api";
   import ModelPicker from "./ModelPicker.svelte";
   import ConnectorsMenu from "./ConnectorsMenu.svelte";
@@ -81,7 +82,7 @@
       else getConversation(e.id).then((c) => { messages = c.messages; title = c.title; scrollDown(); }).catch(() => {});
     } else {
       if (e.partial) messages.push({ role: "assistant", content: e.partial });
-      if (e.error) { error = e.error; messages.push({ role: "assistant", content: `⚠️ ${e.error}` }); }
+      if (e.error) { error = e.error; messages.push({ role: "assistant", content: `Error: ${e.error}` }); }
     }
     textarea?.focus();
     scrollDown();
@@ -162,9 +163,9 @@
         <div class="flex flex-wrap gap-1.5 px-1 pt-1">
           {#each attached as a, i (a.value + i)}
             <span class="flex max-w-[240px] items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] py-1 pl-1 pr-2 text-[12px]">
-              {#if a.kind === "image"}<img src={a.value} alt="" class="h-7 w-7 rounded object-cover" />{:else}<span class="pl-1">{a.kind === "url" ? "🔗" : "💬"}</span>{/if}
+              {#if a.kind === "image"}<img src={a.value} alt="" class="h-7 w-7 rounded object-cover" />{:else}<span class="pl-1 text-[var(--text-muted)]">{#if a.kind === "url"}<Link size={13} strokeWidth={1.8} />{:else}<MessageSquare size={13} strokeWidth={1.8} />{/if}</span>{/if}
               <span class="truncate">{a.label}</span>
-              <button type="button" class="text-[var(--text-dim)] hover:text-[var(--text)]" title="Remove" onclick={() => attached.splice(i, 1)}>×</button>
+              <button type="button" class="text-[var(--text-dim)] hover:text-[var(--text)]" title="Remove" onclick={() => attached.splice(i, 1)}><X size={13} strokeWidth={1.8} /></button>
             </span>
           {/each}
         </div>
@@ -226,7 +227,7 @@
           <MessageBubble role={m.role} content={m.content} time={m.created_at}
             model={m.role === "assistant" ? model || status?.model : undefined}
             onRetry={!busy && i === messages.length - 1 && m.role === "assistant" ? retry : undefined}
-            onEdit={m.role === "user" ? () => { input = m.content; textarea?.focus(); } : undefined} />
+            onEdit={m.role === "user" ? () => { input = m.content.replace(/(\n\[(page|chat|images)\] .+)+$/, "").trimEnd(); textarea?.focus(); } : undefined} />
         {/each}
         {#if pendingQ}<MessageBubble role="user" content={pendingQ} />{/if}
         {#if busy}

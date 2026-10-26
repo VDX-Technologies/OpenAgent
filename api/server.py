@@ -121,7 +121,10 @@ class ChatRequest(BaseModel):
 
 
 def _attachments(body: ChatRequest, a: Any) -> tuple[str, list[str], str]:
-    """Turn a request's attachments into (model context, images, note for the stored message)."""
+    """Turn a request's attachments into (model context, images, note for the stored message).
+
+    The note is one ``[chat|page|images] value`` line per attachment; the UI shows them as chips.
+    """
     parts: list[str] = []
     note: list[str] = []
     for cid in body.ref_conversations:
@@ -131,14 +134,14 @@ def _attachments(body: ChatRequest, a: Any) -> tuple[str, list[str], str]:
         lines = [f"{m['role']}: {m['content']}" for m in a.memory.get_conversation_messages(cid)]
         text = "\n".join(lines)[-8000:]
         parts.append(f"[Referenced chat \"{conv['title']}\"]\n{text}")
-        note.append(f"💬 {conv['title']}")
+        note.append(f"[chat] {conv['title']}")
     for url in body.urls:
         parts.append(f"[Attached web page]\n{web.fetch_url(url, max_chars=8000)}")
-        note.append(f"🔗 {url}")
+        note.append(f"[page] {url}")
     images = [i.split(",", 1)[1] if i.startswith("data:") else i for i in body.images]
     if images:
-        note.append(f"🖼 {len(images)} image{'s' if len(images) > 1 else ''}")
-    return "\n\n".join(parts), images, "  ".join(note)
+        note.append(f"[images] {len(images)}")
+    return "\n\n".join(parts), images, "\n".join(note)
 
 
 class ChatResponse(BaseModel):

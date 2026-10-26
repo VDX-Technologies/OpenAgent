@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { Blocks } from "@lucide/svelte";
   import { getConnectors, setConnector, type Connector } from "#lib/api";
 
   let open = $state(false);
@@ -19,7 +20,7 @@
 <div class="relative">
   <button type="button" onclick={(e) => { e.stopPropagation(); open = !open; }}
     class="flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1 text-[12px] text-[var(--text-muted)] hover:text-[var(--text)]">
-    ⌁ Apps <span class="text-[var(--text-dim)]">{on}</span>
+    <Blocks size={13} strokeWidth={1.8} /> Apps <span class="text-[var(--text-dim)]">{on}</span>
   </button>
   {#if open}
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->

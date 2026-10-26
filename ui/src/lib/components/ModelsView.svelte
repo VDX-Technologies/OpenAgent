@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Check } from "@lucide/svelte";
   import { confirmAction } from "#lib/confirm.svelte";
   import { deleteModel, getModelsDetailed, getPulls, getSystem, pullModel,
     type InstalledModel, type PullState, type Recommendation, type SystemProfile } from "#lib/api";
@@ -111,7 +112,7 @@
                   {#each m.tags as t (t)}<span class="rounded bg-[var(--bg-elevated)] px-1.5">{t}</span>{/each}
                 </div>
                 {#if m.installed}
-                  <span class="text-[11.5px] text-[var(--ok)]">✓ Installed</span>
+                  <span class="flex items-center gap-1 text-[11.5px] text-[var(--ok)]"><Check size={13} strokeWidth={2} /> Installed</span>
                 {:else if p?.state === "pulling"}
                   <span class="text-[11.5px] tabular-nums text-[var(--accent)]">{p.total ? `${pct(p)}%` : p.status}</span>
                 {:else}

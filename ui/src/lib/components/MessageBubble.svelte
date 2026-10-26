@@ -1,5 +1,10 @@
 <script lang="ts">
   import { marked, type Tokens } from "marked";
+  import { Check, Copy, Image, Link, MessageSquare, Pencil, RotateCcw } from "@lucide/svelte";
+
+  /** Attachment note lines the server appends to a user message: "[page] url", "[chat] title", "[images] n". */
+  const NOTE = /^\[(page|chat|images)\] (.+)$/;
+  const ICONS = { page: Link, chat: MessageSquare, images: Image } as const;
 
   let { role, content, time, model, streaming = false, onRetry, onEdit }: {
     role: "user" | "assistant"; content: string; time?: string; model?: string; streaming?: boolean;
@@ -13,11 +18,21 @@
   renderer.link = ({ href, text }: Tokens.Link) => `<a href="${esc(href)}" target="_blank" rel="noreferrer">${text}</a>`;
   renderer.html = ({ text }: Tokens.HTML | Tokens.Tag) => esc(text);
 
+  const parts = $derived.by(() => {
+    if (role !== "user") return { text: content, notes: [] as { kind: keyof typeof ICONS; label: string }[] };
+    const lines = content.split("\n");
+    const notes: { kind: keyof typeof ICONS; label: string }[] = [];
+    while (lines.length && NOTE.test(lines[lines.length - 1])) {
+      const [, kind, value] = lines.pop()!.match(NOTE)!;
+      notes.unshift({ kind: kind as keyof typeof ICONS, label: kind === "images" ? `${value} image${value === "1" ? "" : "s"}` : value });
+    }
+    return { text: lines.join("\n").trimEnd(), notes };
+  });
   const html = $derived(role === "assistant" ? (marked.parse(content, { renderer, async: false }) as string) : "");
   let copied = $state(false);
   const fmt = (t?: string) => (t ? new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "");
 
-  function copy() { navigator.clipboard.writeText(content); copied = true; setTimeout(() => (copied = false), 1200); }
+  function copy() { navigator.clipboard.writeText(parts.text); copied = true; setTimeout(() => (copied = false), 1200); }
   function onClick(e: MouseEvent) {
     const b = (e.target as HTMLElement).closest("[data-copy]") as HTMLButtonElement | null;
     if (!b) return;
@@ -28,11 +43,21 @@
 
 {#if role === "user"}
   <div class="msg-in group flex flex-col items-end">
-    <div class="max-w-[80%] whitespace-pre-wrap rounded-3xl rounded-br-lg bg-[var(--bg-hover)] px-4 py-2.5 text-[14px] leading-relaxed">{content}</div>
-    <div class="mt-1 flex gap-2 text-[11px] text-[var(--text-dim)] opacity-0 group-hover:opacity-100">
+    {#if parts.notes.length}
+      <div class="mb-1.5 flex max-w-[80%] flex-wrap justify-end gap-1.5">
+        {#each parts.notes as n, i (i)}
+          {@const Icon = ICONS[n.kind]}
+          <span class="flex max-w-[240px] items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] px-2 py-1 text-[12px] text-[var(--text-muted)]">
+            <Icon size={13} strokeWidth={1.8} class="shrink-0" /><span class="truncate">{n.label}</span>
+          </span>
+        {/each}
+      </div>
+    {/if}
+    {#if parts.text}<div class="max-w-[80%] whitespace-pre-wrap rounded-3xl rounded-br-lg bg-[var(--bg-hover)] px-4 py-2.5 text-[14px] leading-relaxed">{parts.text}</div>{/if}
+    <div class="mt-1 flex items-center gap-2 text-[11px] text-[var(--text-dim)] opacity-0 group-hover:opacity-100">
       <span>{fmt(time)}</span>
-      {#if onEdit}<button onclick={onEdit} class="hover:text-[var(--text)]" title="Edit">✎</button>{/if}
-      <button onclick={copy} class="hover:text-[var(--text)]" title="Copy">{copied ? "✓" : "⧉"}</button>
+      {#if onEdit}<button onclick={onEdit} class="hover:text-[var(--text)]" title="Edit"><Pencil size={12} strokeWidth={1.8} /></button>{/if}
+      <button onclick={copy} class="hover:text-[var(--text)]" title="Copy">{#if copied}<Check size={12} strokeWidth={1.8} />{:else}<Copy size={12} strokeWidth={1.8} />{/if}</button>
     </div>
   </div>
 {:else}
@@ -49,7 +74,7 @@
       {#if !streaming}
         <div class="mt-1.5 flex gap-3 text-[11.5px] text-[var(--text-dim)] opacity-0 group-hover:opacity-100">
           <button onclick={copy} class="hover:text-[var(--text)]">{copied ? "Copied" : "Copy"}</button>
-          {#if onRetry}<button onclick={onRetry} class="hover:text-[var(--text)]">↻ Regenerate</button>{/if}
+          {#if onRetry}<button onclick={onRetry} class="flex items-center gap-1 hover:text-[var(--text)]"><RotateCcw size={12} strokeWidth={1.8} /> Regenerate</button>{/if}
         </div>
       {/if}
     </div>

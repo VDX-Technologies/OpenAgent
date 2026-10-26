@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { X } from "@lucide/svelte";
   import { goto } from "$app/navigation";
   import { getNotifications, type Note } from "#lib/api";
 
@@ -39,7 +40,7 @@
           <p class="text-[13px] font-medium text-[var(--text)]">{n.title}</p>
           <p class="mt-0.5 line-clamp-3 text-[12.5px] text-[var(--text-muted)]">{n.text}</p>
         </button>
-        <button class="text-[var(--text-dim)] hover:text-[var(--text)]" aria-label="Dismiss" onclick={() => dismiss(n.id)}>✕</button>
+        <button class="text-[var(--text-dim)] hover:text-[var(--text)]" aria-label="Dismiss" onclick={() => dismiss(n.id)}><X size={14} strokeWidth={1.8} /></button>
       </div>
     </div>
   {/each}

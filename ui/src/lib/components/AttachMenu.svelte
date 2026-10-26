@@ -4,6 +4,7 @@
 </script>
 
 <script lang="ts">
+  import { Image as ImageIcon, Link, MessageSquare, Plus } from "@lucide/svelte";
   import { listConversations, type Conversation } from "#lib/api";
 
   let { items = $bindable([]) }: { items: Attached[] } = $props();
@@ -75,8 +76,8 @@
 
 <div class="relative">
   <button type="button" title="Attach" onclick={(e) => { e.stopPropagation(); open ? close() : (open = true); }}
-    class="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--border)] text-[15px] text-[var(--text-muted)] hover:text-[var(--text)]">
-    +
+    class="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]">
+    <Plus size={15} strokeWidth={1.8} />
   </button>
   {#if open}
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
@@ -85,15 +86,15 @@
       {#if mode === "menu"}
         <button type="button" disabled={count("image") >= MAX_IMAGES} onclick={() => fileInput.click()}
           class="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[12.5px] hover:bg-[var(--bg-hover)] disabled:opacity-40">
-          🖼 Upload image
+          <ImageIcon size={15} strokeWidth={1.7} class="text-[var(--text-muted)]" /> Upload image
         </button>
         <button type="button" disabled={count("url") >= MAX_URLS} onclick={() => (mode = "url")}
           class="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[12.5px] hover:bg-[var(--bg-hover)] disabled:opacity-40">
-          🔗 Attach web page
+          <Link size={15} strokeWidth={1.7} class="text-[var(--text-muted)]" /> Attach web page
         </button>
         <button type="button" disabled={count("chat") >= MAX_CHATS} onclick={() => { mode = "chat"; loadChats(); }}
           class="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[12.5px] hover:bg-[var(--bg-hover)] disabled:opacity-40">
-          💬 Reference a chat
+          <MessageSquare size={15} strokeWidth={1.7} class="text-[var(--text-muted)]" /> Reference a chat
         </button>
       {:else if mode === "url"}
         <form class="flex gap-1.5 p-1.5" onsubmit={(e) => { e.preventDefault(); addUrl(); }}>

@@ -341,4 +341,4 @@ html { text-rendering: optimizeLegibility; }
 /* native app without a title bar: traffic lights sit over the sidebar */
 .titlebar-strip { display: none; }
 html.desktop .titlebar-strip { display: block; position: fixed; inset: 0 0 auto 0; height: 28px; z-index: 40; }
-html.desktop aside { padding-top: 28px; }
+html.desktop aside, html.desktop main { padding-top: 28px; }

@@ -44,11 +44,12 @@ cat > "$APP/Contents/Info.plist" <<PL
   <key>CFBundleShortVersionString</key><string>1.0</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>LSUIElement</key><true/>
   <key>NSAppleEventsUsageDescription</key><string>VDX controls Calendar, Reminders and Mail on your behalf.</string>
   <key>NSMicrophoneUsageDescription</key><string>VDX listens when you press the mic button, to turn your voice into text on this Mac.</string>
 </dict></plist>
 PL
-cat > "$APP/Contents/MacOS/VDX OpenAgent" <<SH
+cat > "$APP/Contents/Resources/launch.sh" <<SH
 #!/bin/bash
 # Native VDX window (pywebview). Starts Ollama if it is not running.
 # Launch errors go to ~/Library/Logs/VDX.log (readable even if Desktop access is denied).
@@ -58,7 +59,15 @@ pgrep -x ollama >/dev/null || open -ga Ollama 2>/dev/null || (nohup ollama serve
 cd "$ROOT" || { echo "cannot access $ROOT (grant Files & Folders access)"; exit 1; }
 exec "$ROOT/.venv/bin/python" desktop.py
 SH
-chmod +x "$APP/Contents/MacOS/VDX OpenAgent"
+chmod +x "$APP/Contents/Resources/launch.sh"
+# The main executable is a small compiled launcher that runs launch.sh as a child process, so macOS
+# attributes microphone access to this app (see scripts/launcher.c). The Dock icon is the Python window's
+# (LSUIElement hides the launcher's own).
+if ! cc -O2 -o "$APP/Contents/MacOS/VDX OpenAgent" scripts/launcher.c 2>/dev/null; then
+  echo "  ! no C compiler (run: xcode-select --install) — voice input won't get microphone access"
+  /usr/libexec/PlistBuddy -c "Delete :LSUIElement" "$APP/Contents/Info.plist" 2>/dev/null || true
+  ln -sf ../Resources/launch.sh "$APP/Contents/MacOS/VDX OpenAgent"
+fi
 ICON_SRC="ui/static/brand/vdx-dock.png"
 if [ -f "$ICON_SRC" ]; then
   SET="$(mktemp -d)/vdx.iconset"; mkdir -p "$SET"
@@ -69,6 +78,7 @@ if [ -f "$ICON_SRC" ]; then
   iconutil -c icns "$SET" -o "$APP/Contents/Resources/vdx.icns" 2>/dev/null || true
 fi
 codesign --force --deep -s - "$APP" >/dev/null 2>&1 || true
+tccutil reset Microphone ai.vdx.agent.app >/dev/null 2>&1 || true  # forget a silent deny from older builds
 xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
 touch "$APP"
 

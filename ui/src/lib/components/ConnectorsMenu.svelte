@@ -1,17 +1,23 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { Blocks } from "@lucide/svelte";
-  import { getConnectors, setConnector, type Connector } from "#lib/api";
+  import { getConnectors, notifyConnectors, setConnector, type Connector } from "#lib/api";
 
   let open = $state(false);
   let items = $state<Connector[]>([]);
   const on = $derived(items.filter((c) => c.enabled).length);
 
-  onMount(() => { getConnectors().then((r) => (items = r.connectors)).catch(() => {}); });
+  const load = () => getConnectors().then((r) => (items = r.connectors)).catch(() => {});
+
+  onMount(() => {
+    load();
+    window.addEventListener("vdx:connectors", load);
+    return () => window.removeEventListener("vdx:connectors", load);
+  });
 
   async function toggle(c: Connector) {
     c.enabled = !c.enabled;
-    try { items = (await setConnector(c.id, c.enabled)).connectors; } catch { c.enabled = !c.enabled; }
+    try { items = (await setConnector(c.id, c.enabled)).connectors; notifyConnectors(); } catch { c.enabled = !c.enabled; }
   }
 </script>
 

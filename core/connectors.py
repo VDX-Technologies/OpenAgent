@@ -17,7 +17,7 @@ from typing import Any, Callable
 
 from config.settings import get_settings, reload_settings, save_settings_to_env
 from tools import apple_calendar, apple_contacts, apple_mail, apple_messages, apple_notes
-from tools import apple_reminders, code_workspace, github_tool, gmail_tool, web, whatsapp
+from tools import apple_reminders, code_workspace, github_tool, gmail_tool, phone, web, whatsapp
 
 
 @dataclass
@@ -65,6 +65,11 @@ CONNECTORS: list[Connector] = [
     Connector(
         "web", "Web", "Search the internet and read web pages.",
         web.TOOL_DESCRIPTORS, web.TOOLS,
+    ),
+    Connector(
+        "phone", "Phone", "Send push notifications to your phone (ntfy).",
+        phone.TOOL_DESCRIPTORS, phone.TOOLS, phone.configured,
+        "Set a phone topic in Settings → Phone, then subscribe to it in the ntfy app.",
     ),
     Connector(
         "code", "Code", "Read, edit, commit and push code in a local git repo.",

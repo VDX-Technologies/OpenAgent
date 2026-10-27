@@ -81,6 +81,22 @@ class GitHubConfig:
 
 
 @dataclass
+class PhoneConfig:
+    """Push notifications to the user's phone via ntfy."""
+
+    ntfy_server: str = field(default_factory=lambda: _env("NTFY_SERVER", "https://ntfy.sh"))
+    ntfy_topic: str = field(default_factory=lambda: _env("NTFY_TOPIC", ""))
+
+
+@dataclass
+class VoiceConfig:
+    """Local speech-to-text (faster-whisper)."""
+
+    # tiny / base / small / medium / large-v3 — bigger is more accurate and slower
+    whisper_model: str = field(default_factory=lambda: _env("WHISPER_MODEL", "small"))
+
+
+@dataclass
 class CodeConfig:
     """Local git repository the coding agent operates in."""
 
@@ -109,6 +125,8 @@ class Settings:
     whatsapp: WhatsAppConfig = field(default_factory=WhatsAppConfig)
     github: GitHubConfig = field(default_factory=GitHubConfig)
     code: CodeConfig = field(default_factory=CodeConfig)
+    phone: PhoneConfig = field(default_factory=PhoneConfig)
+    voice: VoiceConfig = field(default_factory=VoiceConfig)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     disabled_connectors: list[str] = field(default_factory=lambda: [
         c.strip() for c in _env("CONNECTORS_DISABLED", "").split(",") if c.strip()

@@ -45,6 +45,7 @@ cat > "$APP/Contents/Info.plist" <<PL
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSAppleEventsUsageDescription</key><string>VDX controls Calendar, Reminders and Mail on your behalf.</string>
+  <key>NSMicrophoneUsageDescription</key><string>VDX listens when you press the mic button, to turn your voice into text on this Mac.</string>
 </dict></plist>
 PL
 cat > "$APP/Contents/MacOS/VDX OpenAgent" <<SH

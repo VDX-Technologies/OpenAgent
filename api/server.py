@@ -16,7 +16,8 @@ from pathlib import Path
 from collections.abc import Iterator
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -29,7 +30,8 @@ from core.llm import OllamaClient
 from core.memory import MemoryManager
 from core.telemetry_share import TelemetryShare
 from api import __version__, updater
-from tools import web
+from tools import phone, web
+from core import voice
 
 logger = logging.getLogger(__name__)
 
@@ -194,6 +196,9 @@ class SettingsPayload(BaseModel):
     whatsapp_phone_id: str = ""
     github_token: str = ""
     code_workspace: str = ""
+    # None = not sent by this client (the Next.js UI): leave the stored value alone
+    ntfy_server: str | None = None
+    ntfy_topic: str | None = None
 
 
 class ConnectorToggle(BaseModel):
@@ -532,6 +537,8 @@ def get_settings_api() -> SettingsPayload:
         whatsapp_phone_id=s.whatsapp.phone_id,
         github_token=s.github.token,
         code_workspace=s.code.workspace,
+        ntfy_server=s.phone.ntfy_server,
+        ntfy_topic=s.phone.ntfy_topic,
     )
 
 
@@ -554,6 +561,10 @@ def put_settings(body: SettingsPayload) -> dict[str, str]:
         "GITHUB_TOKEN": body.github_token.strip(),
         "CODE_WORKSPACE": body.code_workspace.strip(),
     }
+    if body.ntfy_server is not None:
+        updates["NTFY_SERVER"] = body.ntfy_server.strip() or "https://ntfy.sh"
+    if body.ntfy_topic is not None:
+        updates["NTFY_TOPIC"] = body.ntfy_topic.strip()
     if not updates["OLLAMA_BASE_URL"] or not updates["OLLAMA_MODEL"]:
         raise HTTPException(400, "Ollama URL and model are required")
 
@@ -570,6 +581,41 @@ def put_settings(body: SettingsPayload) -> dict[str, str]:
         raise HTTPException(500, f"Could not write .env: {exc}") from exc
 
     return {"status": "saved", "path": str(path)}
+
+
+# ── Phone & voice ────────────────────────────────────────────────────
+
+
+@app.post("/api/phone/test")
+def phone_test() -> dict[str, str]:
+    """Send a test notification to the configured ntfy topic."""
+    result = phone.send_to_phone("VDX OpenAgent can reach your phone.", "VDX connected")
+    if result.startswith("Error"):
+        raise HTTPException(400, result)
+    return {"status": result}
+
+
+@app.get("/api/voice")
+def voice_status() -> dict[str, bool]:
+    """Whether local speech-to-text is installed."""
+    return {"available": voice.available()}
+
+
+@app.post("/api/voice/transcribe")
+async def voice_transcribe(request: Request, language: str = "") -> dict[str, str]:
+    """Transcribe a recorded clip (raw audio in the request body) on this Mac."""
+    audio = await request.body()
+    if not audio:
+        raise HTTPException(400, "No audio received")
+    if len(audio) > 25_000_000:
+        raise HTTPException(413, "Recording too long")
+    try:
+        return await run_in_threadpool(voice.transcribe, audio, language or None)
+    except voice.VoiceUnavailable as exc:
+        raise HTTPException(501, str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Transcription failed")
+        raise HTTPException(500, f"Transcription failed: {exc}") from exc
 
 
 # ── Automations ──────────────────────────────────────────────────────

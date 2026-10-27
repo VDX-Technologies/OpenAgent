@@ -176,6 +176,11 @@ def notify(title: str, text: str, conversation_id: int | None = None) -> None:
         _note_seq += 1
         _notes.append({"id": _note_seq, "title": title, "text": text[:400], "conversation_id": conversation_id})
         del _notes[:-50]
+    from core import connectors  # late import: connectors imports this module
+    from tools import phone
+
+    if phone.configured() and connectors.is_enabled("phone"):
+        threading.Thread(target=phone.send_to_phone, args=(text[:2000], title), daemon=True).start()
 
 
 def notifications_since(after: int = 0) -> list[dict[str, Any]]:

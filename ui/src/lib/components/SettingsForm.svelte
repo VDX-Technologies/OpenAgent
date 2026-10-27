@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { getModels, getSettings, saveSettings, type SettingsPayload } from "#lib/api";
+  import { getModels, getSettings, saveSettings, testPhone, type SettingsPayload } from "#lib/api";
   import { resetOnboarding } from "#lib/ui";
   import PageHeader from "./PageHeader.svelte";
   import Panel from "./Panel.svelte";
@@ -28,6 +28,10 @@
       { key: "whatsapp_token", label: "Access token", type: "password" },
       { key: "whatsapp_phone_id", label: "Phone number ID" },
     ] },
+    { title: "Phone", fields: [
+      { key: "ntfy_topic", label: "ntfy topic", placeholder: "click Generate" },
+      { key: "ntfy_server", label: "ntfy server", placeholder: "https://ntfy.sh" },
+    ] },
     { title: "GitHub & Code", fields: [
       { key: "github_token", label: "GitHub token", type: "password" },
       { key: "code_workspace", label: "Code workspace", placeholder: "~/projects" },
@@ -38,7 +42,20 @@
     ollama_base_url: "", ollama_model: "", ollama_temperature: 0.7, ollama_timeout: 120,
     gmail_address: "", gmail_app_password: "", discord_bot_token: "", discord_prefix: "!",
     discord_allowed_users: "", whatsapp_token: "", whatsapp_phone_id: "", github_token: "", code_workspace: "",
+    ntfy_server: "https://ntfy.sh", ntfy_topic: "",
   });
+  let phoneMsg = $state<{ ok: boolean; text: string } | null>(null);
+
+  function newTopic() {
+    const bytes = crypto.getRandomValues(new Uint8Array(12));
+    form.ntfy_topic = "vdx-" + Array.from(bytes, (b) => b.toString(36).padStart(2, "0")).join("").slice(0, 20);
+  }
+
+  async function sendTest() {
+    phoneMsg = null;
+    try { await save(); phoneMsg = { ok: true, text: (await testPhone()).status }; }
+    catch (e) { phoneMsg = { ok: false, text: e instanceof Error ? e.message : "Failed" }; }
+  }
   let models = $state<string[]>([]);
   let saving = $state(false);
   let msg = $state<string | null>(null);
@@ -78,6 +95,12 @@
         <Panel title={s.title}>
           {#snippet action()}
             {#if s.title === "Ollama"}<button class="ghost-btn !text-[12px]" onclick={refreshModels}>Refresh models</button>{/if}
+            {#if s.title === "Phone"}
+              <div class="flex gap-2">
+                <button class="ghost-btn !text-[12px]" onclick={newTopic}>Generate</button>
+                <button class="ghost-btn !text-[12px]" disabled={!form.ntfy_topic} onclick={sendTest}>Send test</button>
+              </div>
+            {/if}
           {/snippet}
           <div class="grid gap-4 md:grid-cols-2">
             {#each s.fields as f (f.key)}
@@ -89,6 +112,14 @@
               </label>
             {/each}
           </div>
+          {#if s.title === "Phone"}
+            <p class="mt-3 text-[12px] leading-relaxed text-[var(--text-muted)]">
+              Install the free <a class="text-[var(--accent)] hover:underline" href="https://ntfy.sh" target="_blank" rel="noreferrer">ntfy</a> app
+              on your phone and subscribe to this topic. VDX can then message you, and automation results arrive as notifications.
+              Anyone who knows the topic name can read it, so keep it random.
+            </p>
+            {#if phoneMsg}<p class="mt-2 text-[12px] {phoneMsg.ok ? 'text-[var(--ok)]' : 'text-[var(--danger)]'}">{phoneMsg.text}</p>{/if}
+          {/if}
         </Panel>
       {/each}
       <SharingPanel />

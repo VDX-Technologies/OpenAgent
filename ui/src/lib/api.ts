@@ -39,6 +39,8 @@ export type SettingsPayload = {
   whatsapp_phone_id: string;
   github_token: string;
   code_workspace: string;
+  ntfy_server?: string;
+  ntfy_topic?: string;
 };
 
 export type Connector = {
@@ -386,6 +388,26 @@ export type Note = { id: number; title: string; text: string; conversation_id: n
 
 /** In-app notifications (automation results) newer than `after`. */
 export const getNotifications = (after = 0) => request<{ items: Note[] }>(`/api/notifications?after=${after}`);
+
+/** Send a test push notification to the phone topic in Settings. */
+export const testPhone = () => request<{ status: string }>("/api/phone/test", { method: "POST" });
+
+/** Whether local speech-to-text (faster-whisper) is installed on the Mac. */
+export const getVoice = () => request<{ available: boolean }>("/api/voice");
+
+/** Transcribe a recorded clip on the Mac. */
+export async function transcribe(audio: Blob): Promise<{ text: string; language: string }> {
+  const r = await fetch(`${API_BASE}/api/voice/transcribe`, {
+    method: "POST", headers: { "Content-Type": audio.type || "application/octet-stream" }, body: audio,
+  });
+  if (!r.ok) throw new Error((await r.json().catch(() => null))?.detail ?? `Transcription failed (${r.status})`);
+  return r.json();
+}
+
+/** Tell connector toggles (Apps menu, Web switch) to reload. */
+export function notifyConnectors() {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event("vdx:connectors"));
+}
 
 export type UpdateInfo = {
   current: string;

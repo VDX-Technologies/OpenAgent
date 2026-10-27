@@ -12,6 +12,8 @@
   import { getUpdate } from "#lib/api";
   import ModelPicker from "./ModelPicker.svelte";
   import ConnectorsMenu from "./ConnectorsMenu.svelte";
+  import WebToggle from "./WebToggle.svelte";
+  import VoiceButton from "./VoiceButton.svelte";
 
   const HINTS = [
     "What’s on my calendar today?", "Remind me to call Alex at 6pm", "Any unread emails?",
@@ -177,12 +179,15 @@
         <AttachMenu bind:items={attached} />
         <ModelPicker bind:value={model} fallback={status?.model} />
         <ConnectorsMenu />
+        <WebToggle />
         <div class="flex-1"></div>
         {#if lastUsage && !busy}
           <span class="mr-2 hidden text-[11px] text-[var(--text-dim)] sm:inline" title="Last reply: prompt / completion tokens · time · tool calls">
             {lastUsage.prompt_tokens}↑ {lastUsage.completion_tokens}↓ · {(lastUsage.duration_ms / 1000).toFixed(1)}s{lastUsage.tool_calls ? ` · ${lastUsage.tool_calls} tools` : ""}
           </span>
         {/if}
+        <VoiceButton ontext={(t) => { input = input.trim() ? `${input.trimEnd()} ${t}` : t; textarea?.focus(); }}
+          onerror={(m) => (error = m)} />
         {#if busy}
           <button type="button" onclick={() => run?.ctrl.abort()} title="Stop" class="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--accent)] text-[var(--accent-text)]"><span class="h-2.5 w-2.5 rounded-[2px] bg-current"></span></button>
         {:else}

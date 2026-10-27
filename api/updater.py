@@ -190,7 +190,9 @@ def _drop_worktree() -> None:
 
 
 def _pip(*args: str) -> None:
-    _run(sys.executable, "-m", "pip", *args)
+    # the app bundle runs a copy of the interpreter; packages belong to the project's venv
+    venv = ROOT / ".venv" / "bin" / "python"
+    _run(str(venv) if venv.exists() else sys.executable, "-m", "pip", *args)
 
 
 def _apply(tag: str) -> None:
@@ -261,6 +263,9 @@ def restart() -> dict:
     def go() -> None:
         time.sleep(0.5)  # let the HTTP response go out first
         os.chdir(ROOT)
+        launcher = os.environ.get("VDX_LAUNCHER")  # started from the app bundle: relaunch through it
+        if launcher and os.path.exists(launcher):
+            os.execv(launcher, [launcher])
         os.execv(sys.executable, [sys.executable, *sys.argv])
 
     threading.Thread(target=go, name="vdx-restart", daemon=True).start()

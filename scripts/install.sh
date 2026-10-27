@@ -44,7 +44,6 @@ cat > "$APP/Contents/Info.plist" <<PL
   <key>CFBundleShortVersionString</key><string>1.0</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>NSHighResolutionCapable</key><true/>
-  <key>LSUIElement</key><true/>
   <key>NSAppleEventsUsageDescription</key><string>VDX controls Calendar, Reminders and Mail on your behalf.</string>
   <key>NSMicrophoneUsageDescription</key><string>VDX listens when you press the mic button, to turn your voice into text on this Mac.</string>
 </dict></plist>
@@ -60,12 +59,27 @@ cd "$ROOT" || { echo "cannot access $ROOT (grant Files & Folders access)"; exit 
 exec "$ROOT/.venv/bin/python" desktop.py
 SH
 chmod +x "$APP/Contents/Resources/launch.sh"
-# The main executable is a small compiled launcher that runs launch.sh as a child process, so macOS
-# attributes microphone access to this app (see scripts/launcher.c). The Dock icon is the Python window's
-# (LSUIElement hides the launcher's own).
-if ! cc -O2 -o "$APP/Contents/MacOS/VDX OpenAgent" scripts/launcher.c 2>/dev/null; then
-  echo "  ! no C compiler (run: xcode-select --install) — voice input won't get microphone access"
-  /usr/libexec/PlistBuddy -c "Delete :LSUIElement" "$APP/Contents/Info.plist" 2>/dev/null || true
+# The app runs a copy of the Python interpreter inside the bundle, through a small compiled launcher
+# (scripts/launcher.c): macOS then sees the process as VDX OpenAgent — its name and icon in the Dock, and
+# its own microphone permission. launch.sh is the fallback when there is no C compiler.
+PY_INFO="$(.venv/bin/python - <<'PY'
+import os, sys, sysconfig
+app = os.path.join(sys.base_prefix, "Resources/Python.app/Contents/MacOS/Python")  # framework builds
+exe = app if os.path.exists(app) else os.path.realpath(sys._base_executable)
+print(exe); print(sys.base_prefix); print(sysconfig.get_paths()["purelib"])
+PY
+)"
+PY_BIN="$(sed -n 1p <<<"$PY_INFO")"; PY_HOME="$(sed -n 2p <<<"$PY_INFO")"; PY_SITE="$(sed -n 3p <<<"$PY_INFO")"
+# (the copy must run from inside the bundle: some Pythons, e.g. uv's, load their library relative to themselves)
+if cp "$PY_BIN" "$APP/Contents/MacOS/vdx-python" 2>/dev/null &&
+   PYTHONHOME="$PY_HOME" "$APP/Contents/MacOS/vdx-python" -c "import encodings, ssl" 2>/dev/null &&
+   cc -O2 -o "$APP/Contents/MacOS/VDX OpenAgent" scripts/launcher.c \
+     -DVDX_ROOT="\"$ROOT\"" -DVDX_HOME="\"$PY_HOME\"" -DVDX_SITE="\"$PY_SITE\"" 2>/dev/null; then
+  :
+else
+  echo "  ! couldn't build the app launcher (no C compiler? run: xcode-select --install, then this script again)"
+  echo "    the app still works, but the Dock shows Python and voice input can't use the microphone"
+  rm -f "$APP/Contents/MacOS/vdx-python"
   ln -sf ../Resources/launch.sh "$APP/Contents/MacOS/VDX OpenAgent"
 fi
 ICON_SRC="ui/static/brand/vdx-dock.png"

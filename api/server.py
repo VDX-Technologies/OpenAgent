@@ -597,8 +597,37 @@ def phone_test() -> dict[str, str]:
 
 @app.get("/api/voice")
 def voice_status() -> dict[str, bool]:
-    """Whether local speech-to-text is installed."""
-    return {"available": voice.available()}
+    """Whether local speech-to-text is installed, and whether the app can record the mic itself."""
+    return {"available": voice.available(), "native": voice.available() and voice.can_record()}
+
+
+@app.post("/api/voice/record/start")
+def voice_record_start() -> dict[str, str]:
+    """Start recording the Mac's microphone."""
+    if not voice.can_record():
+        raise HTTPException(501, "Recording needs sounddevice: .venv/bin/pip install sounddevice")
+    try:
+        voice.start_recording()
+    except RuntimeError as exc:
+        raise HTTPException(500, str(exc)) from exc
+    return {"status": "recording"}
+
+
+@app.post("/api/voice/record/stop")
+def voice_record_stop(discard: bool = False) -> dict[str, str]:
+    """Stop recording and return the transcription (or just stop, with ``discard``)."""
+    if discard:
+        voice.stop_recording(discard=True)
+        return {"text": "", "language": ""}
+    try:
+        return voice.transcribe_recording()
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except voice.VoiceUnavailable as exc:
+        raise HTTPException(501, str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Transcription failed")
+        raise HTTPException(500, f"Transcription failed: {exc}") from exc
 
 
 @app.post("/api/voice/transcribe")

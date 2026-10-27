@@ -393,7 +393,12 @@ export const getNotifications = (after = 0) => request<{ items: Note[] }>(`/api/
 export const testPhone = () => request<{ status: string }>("/api/phone/test", { method: "POST" });
 
 /** Whether local speech-to-text (faster-whisper) is installed on the Mac. */
-export const getVoice = () => request<{ available: boolean }>("/api/voice");
+export const getVoice = () => request<{ available: boolean; native: boolean }>("/api/voice");
+
+/** Record the Mac's microphone from the backend (works in the app window, which can't use the mic itself). */
+export const startRecording = () => request<{ status: string }>("/api/voice/record/start", { method: "POST" });
+export const stopRecording = (discard = false) =>
+  request<{ text: string; language: string }>(`/api/voice/record/stop${discard ? "?discard=true" : ""}`, { method: "POST" });
 
 /** Transcribe a recorded clip on the Mac. */
 export async function transcribe(audio: Blob): Promise<{ text: string; language: string }> {

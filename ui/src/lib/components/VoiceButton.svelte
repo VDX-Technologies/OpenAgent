@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { LoaderCircle, Mic, Square } from "@lucide/svelte";
-  import { getVoice, transcribe } from "#lib/api";
+  import { getVoice, startRecording, stopRecording, transcribe } from "#lib/api";
 
   /** Mic button: records, transcribes, and hands the text to `ontext`. */
   let { ontext, onerror }: { ontext: (text: string) => void; onerror?: (msg: string) => void } = $props();
@@ -10,8 +10,9 @@
     onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
     onerror: ((e: { error: string }) => void) | null; onend: (() => void) | null };
 
-  // "local" = record and transcribe on the Mac (Whisper); "browser" = the browser's own recognizer
-  let mode = $state<"local" | "browser" | null>(null);
+  // "native" = the backend records the Mac's mic and transcribes it (Whisper) — works in the app window;
+  // "local" = the page records, the backend transcribes; "browser" = the browser's own recognizer
+  let mode = $state<"native" | "local" | "browser" | null>(null);
   let phase = $state<"idle" | "recording" | "working">("idle");
   let seconds = $state(0);
   let recorder: MediaRecorder | null = null;
@@ -24,9 +25,12 @@
   onMount(() => {
     const canRecord = !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined";
     getVoice()
-      .then((v) => (mode = v.available && canRecord ? "local" : browserSR() ? "browser" : null))
+      .then((v) => (mode = v.native ? "native" : v.available && canRecord ? "local" : browserSR() ? "browser" : null))
       .catch(() => (mode = browserSR() ? "browser" : null));
-    return () => { stopTracks(); clearInterval(timer); };
+    return () => {
+      stopTracks(); clearInterval(timer);
+      if (mode === "native" && phase === "recording") stopRecording(true).catch(() => {});
+    };
   });
 
   function fail(msg: string) { phase = "idle"; clearInterval(timer); onerror?.(msg); }
@@ -53,6 +57,20 @@
     recorder.start();
   }
 
+  async function startNative() {
+    try { await startRecording(); }
+    catch (e) { fail(e instanceof Error ? e.message : "Could not start recording"); }
+  }
+
+  async function stopNative() {
+    phase = "working";
+    try {
+      const { text } = await stopRecording();
+      if (text) ontext(text);
+      phase = "idle";
+    } catch (e) { fail(e instanceof Error ? e.message : "Transcription failed"); }
+  }
+
   function startBrowser() {
     const Ctor = browserSR();
     if (!Ctor) return fail("Voice input isn't available here");
@@ -62,7 +80,9 @@
     recognizer.interimResults = false;
     recognizer.continuous = true;
     recognizer.onresult = (e) => { text = Array.from(e.results, (r) => r[0].transcript).join(" "); };
-    recognizer.onerror = (e) => fail(e.error === "not-allowed" ? "Microphone access was denied" : `Voice input error: ${e.error}`);
+    recognizer.onerror = (e) => fail(e.error === "not-allowed"
+      ? "Microphone access was denied — allow it in System Settings → Privacy & Security → Microphone"
+      : `Voice input error: ${e.error}`);
     recognizer.onend = () => { if (text.trim()) ontext(text.trim()); phase = "idle"; clearInterval(timer); };
     recognizer.start();
   }
@@ -71,13 +91,13 @@
     if (phase === "working") return;
     if (phase === "recording") {
       clearInterval(timer);
-      if (mode === "local") recorder?.stop(); else recognizer?.stop();
-      if (mode === "local") phase = "working";
+      if (mode === "native") return stopNative();
+      if (mode === "local") { recorder?.stop(); phase = "working"; } else recognizer?.stop();
       return;
     }
     phase = "recording"; seconds = 0;
     timer = setInterval(() => (seconds += 1), 1000);
-    if (mode === "local") await startLocal(); else startBrowser();
+    if (mode === "native") await startNative(); else if (mode === "local") await startLocal(); else startBrowser();
   }
 </script>
 

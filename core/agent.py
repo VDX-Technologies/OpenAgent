@@ -75,11 +75,13 @@ class Agent:
 
     # ── Tool registry ────────────────────────────────────────────────
 
-    def _active_tools(self) -> tuple[dict[str, Callable[..., str]], list[dict[str, Any]]]:
-        """Return callables + Ollama schemas for currently enabled connectors."""
+    def _active_tools(self, exclude: frozenset[str] = frozenset()) -> tuple[dict[str, Callable[..., str]], list[dict[str, Any]]]:
+        """Return callables + Ollama schemas for currently enabled connectors (minus *exclude* ids)."""
         funcs: dict[str, Callable[..., str]] = {}
         schemas: list[dict[str, Any]] = []
         for c in connectors.active_connectors():
+            if c.id in exclude:
+                continue
             funcs.update(c.funcs)
             schemas += [
                 {"type": "function", "function": {
@@ -195,7 +197,8 @@ class Agent:
         """
         self._set_state("thinking")
         self.memory.add_message("user", user_message, source=source, conversation_id=conversation_id)
-        self._tools_now, schemas = self._active_tools()
+        # a scheduled run must do its task, not schedule more automations
+        self._tools_now, schemas = self._active_tools(frozenset({"automations"}) if source == "automation" else frozenset())
         messages = [self._system_message(), *self.memory.get_context(conversation_id)]
         if messages[-1].get("role") == "user":
             turn = {**messages[-1], "content": f"[{datetime.now():%H:%M}] {messages[-1]['content']}"}

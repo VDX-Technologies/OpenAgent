@@ -88,6 +88,8 @@ class AutomationStore:
             )
             """
         )
+        # automation chats used to be titled "⏱ name"
+        conn.execute("UPDATE conversations SET title = ltrim(substr(title, 2)) WHERE title LIKE '⏱%'")
         conn.commit()
 
     def _row(self, r: sqlite3.Row | None) -> dict[str, Any] | None:
@@ -176,11 +178,18 @@ def notify(title: str, text: str, conversation_id: int | None = None) -> None:
         _note_seq += 1
         _notes.append({"id": _note_seq, "title": title, "text": text[:400], "conversation_id": conversation_id})
         del _notes[:-50]
+    if _phone_push_on():
+        from tools import phone
+
+        threading.Thread(target=phone.send_to_phone, args=(text[:2000], title), daemon=True).start()
+
+
+def _phone_push_on() -> bool:
+    """Whether notifications also go to the phone (Phone connector set up and enabled)."""
     from core import connectors  # late import: connectors imports this module
     from tools import phone
 
-    if phone.configured() and connectors.is_enabled("phone"):
-        threading.Thread(target=phone.send_to_phone, args=(text[:2000], title), daemon=True).start()
+    return phone.configured() and connectors.is_enabled("phone")
 
 
 def notifications_since(after: int = 0) -> list[dict[str, Any]]:
@@ -227,14 +236,21 @@ class Scheduler:
             mem = self.agent.memory
             cid = a.get("conversation_id")
             if not cid or not mem.get_conversation(cid):
-                cid = mem.create_conversation(f"⏱ {a['name']}")["id"]
-            prompt = (
-                f"[Automation “{a['name']}” — runs unattended, act now without asking questions]\n{a['prompt']}"
+                cid = mem.create_conversation(a["name"])["id"]
+            # Framing goes in the model-only context: put in the message itself, small models read
+            # "Automation …" as a request to create one and answer with questions instead of doing the task.
+            pushed = a.get("notify") and _phone_push_on()
+            context = (
+                "This is a scheduled task running now with nobody watching. Do the task below "
+                "right away: call the tools you need, then reply with the result. Do not ask questions, do not "
+                "ask for confirmation and do not create or change automations."
+                + (" Your reply is sent to the user's phone automatically, so don't call send_to_phone." if pushed else "")
             )
             started = _now().isoformat()
             try:
                 with self.lock:
-                    reply = self.agent.process(prompt, source="automation", model=a.get("model") or None, conversation_id=cid)
+                    reply = self.agent.process(a["prompt"], source="automation", model=a.get("model") or None,
+                                               conversation_id=cid, context=context)
                 status = "ok"
             except Exception as exc:
                 logger.exception("Automation %s failed", aid)

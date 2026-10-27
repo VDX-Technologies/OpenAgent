@@ -70,17 +70,25 @@ print(exe); print(sys.base_prefix); print(sysconfig.get_paths()["purelib"])
 PY
 )"
 PY_BIN="$(sed -n 1p <<<"$PY_INFO")"; PY_HOME="$(sed -n 2p <<<"$PY_INFO")"; PY_SITE="$(sed -n 3p <<<"$PY_INFO")"
-# (the copy must run from inside the bundle: some Pythons, e.g. uv's, load their library relative to themselves)
-if cp "$PY_BIN" "$APP/Contents/MacOS/vdx-python" 2>/dev/null &&
-   PYTHONHOME="$PY_HOME" "$APP/Contents/MacOS/vdx-python" -c "import encodings, ssl" 2>/dev/null &&
-   cc -O2 -o "$APP/Contents/MacOS/VDX OpenAgent" scripts/launcher.c \
-     -DVDX_ROOT="\"$ROOT\"" -DVDX_HOME="\"$PY_HOME\"" -DVDX_SITE="\"$PY_SITE\"" 2>/dev/null; then
-  :
-else
-  echo "  ! couldn't build the app launcher (no C compiler? run: xcode-select --install, then this script again)"
+launcher_fail() {
+  echo "  ! $1"
   echo "    the app still works, but the Dock shows Python and voice input can't use the microphone"
   rm -f "$APP/Contents/MacOS/vdx-python"
   ln -sf ../Resources/launch.sh "$APP/Contents/MacOS/VDX OpenAgent"
+}
+PY_COPY="$APP/Contents/MacOS/vdx-python"
+if ! cp "$PY_BIN" "$PY_COPY"; then
+  launcher_fail "couldn't copy Python ($PY_BIN)"
+# A copied interpreter keeps a signature that is only valid in its original place, and macOS kills it
+# ("Killed: 9"): sign the copy for this Mac (ad hoc, like the rest of the bundle) before running it.
+elif ! codesign --force --sign - "$PY_COPY" 2>/dev/null; then
+  launcher_fail "couldn't sign the copy of Python (codesign failed)"
+# The copy must also run from inside the bundle: some Pythons (e.g. uv's) load their library relative to themselves.
+elif ! PYTHONHOME="$PY_HOME" "$PY_COPY" -c "import encodings, ssl" 2>/dev/null; then
+  launcher_fail "this Python ($PY_BIN) can't run from inside the app bundle"
+elif ! cc -O2 -o "$APP/Contents/MacOS/VDX OpenAgent" scripts/launcher.c \
+     -DVDX_ROOT="\"$ROOT\"" -DVDX_HOME="\"$PY_HOME\"" -DVDX_SITE="\"$PY_SITE\""; then
+  launcher_fail "couldn't compile the app launcher (run: xcode-select --install, then this script again)"
 fi
 ICON_SRC="ui/static/brand/vdx-dock.png"
 if [ -f "$ICON_SRC" ]; then

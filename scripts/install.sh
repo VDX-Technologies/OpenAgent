@@ -28,81 +28,10 @@ fi
 
 echo "▸ App bundle → $APP"
 mkdir -p "$HOME/Applications" data
-rm -rf "$APP" "$HOME/Applications/VDX Agent.app"  # also drop the pre-rename bundle
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cat > "$APP/Contents/Info.plist" <<PL
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>CFBundleName</key><string>VDX OpenAgent</string>
-  <key>CFBundleDisplayName</key><string>VDX OpenAgent</string>
-  <key>CFBundleIdentifier</key><string>ai.vdx.agent.app</string>
-  <key>CFBundleExecutable</key><string>VDX OpenAgent</string>
-  <key>CFBundleIconFile</key><string>vdx</string>
-  <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleVersion</key><string>1.0</string>
-  <key>CFBundleShortVersionString</key><string>1.0</string>
-  <key>LSMinimumSystemVersion</key><string>11.0</string>
-  <key>NSHighResolutionCapable</key><true/>
-  <key>NSAppleEventsUsageDescription</key><string>VDX controls Calendar, Reminders and Mail on your behalf.</string>
-  <key>NSMicrophoneUsageDescription</key><string>VDX listens when you press the mic button, to turn your voice into text on this Mac.</string>
-</dict></plist>
-PL
-cat > "$APP/Contents/Resources/launch.sh" <<SH
-#!/bin/bash
-# Native VDX window (pywebview). Starts Ollama if it is not running.
-# Launch errors go to ~/Library/Logs/VDX.log (readable even if Desktop access is denied).
-exec >>"\$HOME/Library/Logs/VDX.log" 2>&1
-echo "--- \$(date) launching"
-pgrep -x ollama >/dev/null || open -ga Ollama 2>/dev/null || (nohup ollama serve >/dev/null 2>&1 &)
-cd "$ROOT" || { echo "cannot access $ROOT (grant Files & Folders access)"; exit 1; }
-exec "$ROOT/.venv/bin/python" desktop.py
-SH
-chmod +x "$APP/Contents/Resources/launch.sh"
-# The app runs a copy of the Python interpreter inside the bundle, through a small compiled launcher
-# (scripts/launcher.c): macOS then sees the process as VDX OpenAgent — its name and icon in the Dock, and
-# its own microphone permission. launch.sh is the fallback when there is no C compiler.
-PY_INFO="$(.venv/bin/python - <<'PY'
-import os, sys, sysconfig
-app = os.path.join(sys.base_prefix, "Resources/Python.app/Contents/MacOS/Python")  # framework builds
-exe = app if os.path.exists(app) else os.path.realpath(sys._base_executable)
-print(exe); print(sys.base_prefix); print(sysconfig.get_paths()["purelib"])
-PY
-)"
-PY_BIN="$(sed -n 1p <<<"$PY_INFO")"; PY_HOME="$(sed -n 2p <<<"$PY_INFO")"; PY_SITE="$(sed -n 3p <<<"$PY_INFO")"
-launcher_fail() {
-  echo "  ! $1"
-  echo "    the app still works, but the Dock shows Python and voice input can't use the microphone"
-  rm -f "$APP/Contents/MacOS/vdx-python"
-  ln -sf ../Resources/launch.sh "$APP/Contents/MacOS/VDX OpenAgent"
-}
-PY_COPY="$APP/Contents/MacOS/vdx-python"
-if ! cp "$PY_BIN" "$PY_COPY"; then
-  launcher_fail "couldn't copy Python ($PY_BIN)"
-# A copied interpreter keeps a signature that is only valid in its original place, and macOS kills it
-# ("Killed: 9"): sign the copy for this Mac (ad hoc, like the rest of the bundle) before running it.
-elif ! codesign --force --sign - "$PY_COPY" 2>/dev/null; then
-  launcher_fail "couldn't sign the copy of Python (codesign failed)"
-# The copy must also run from inside the bundle: some Pythons (e.g. uv's) load their library relative to themselves.
-elif ! PYTHONHOME="$PY_HOME" "$PY_COPY" -c "import encodings, ssl" 2>/dev/null; then
-  launcher_fail "this Python ($PY_BIN) can't run from inside the app bundle"
-elif ! cc -O2 -o "$APP/Contents/MacOS/VDX OpenAgent" scripts/launcher.c \
-     -DVDX_ROOT="\"$ROOT\"" -DVDX_HOME="\"$PY_HOME\"" -DVDX_SITE="\"$PY_SITE\""; then
-  launcher_fail "couldn't compile the app launcher (run: xcode-select --install, then this script again)"
-fi
-ICON_SRC="ui/static/brand/vdx-dock.png"
-if [ -f "$ICON_SRC" ]; then
-  SET="$(mktemp -d)/vdx.iconset"; mkdir -p "$SET"
-  for s in 16 32 128 256 512; do
-    sips -z $s $s "$ICON_SRC" --out "$SET/icon_${s}x${s}.png" >/dev/null 2>&1
-    sips -z $((s*2)) $((s*2)) "$ICON_SRC" --out "$SET/icon_${s}x${s}@2x.png" >/dev/null 2>&1
-  done
-  iconutil -c icns "$SET" -o "$APP/Contents/Resources/vdx.icns" 2>/dev/null || true
-fi
-codesign --force --deep -s - "$APP" >/dev/null 2>&1 || true
+rm -rf "$APP" "$HOME/Applications/VDX Agent.app"  # fresh install (also drops the pre-rename bundle)
+# api/bundle.py builds the bundle; the app keeps it up to date by itself after every update
+.venv/bin/python -m api.bundle
 tccutil reset Microphone ai.vdx.agent.app >/dev/null 2>&1 || true  # forget a silent deny from older builds
-xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
-touch "$APP"
 
 if [[ "${1:-}" == "--autostart" ]]; then
   echo "▸ Launch at login → $PLIST"

@@ -1,17 +1,18 @@
 """
 Core · LLM Client (Ollama)
 ==========================
-Thin wrapper around the local Ollama HTTP API
-(http://localhost:11434) for chat completions with
-streaming support, using the qwen2.5:7b model by default.
+Thin wrapper around the local Ollama HTTP API (http://localhost:11434):
+streaming chat with tools and reasoning, model management, warm-up and
+embeddings. Failures raise :class:`LLMError` with Ollama's own message, so
+callers can tell "model not installed" from "Ollama is not running".
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from contextlib import nullcontext
-from collections.abc import AsyncIterator, Iterator
+import threading
+from collections.abc import Iterator
 from typing import Any
 
 import httpx
@@ -22,14 +23,14 @@ logger = logging.getLogger(__name__)
 _AUTO_CTX: int | None = None
 
 
-def _with_usage(data: dict[str, Any]) -> dict[str, Any]:
-    """Return the reply message with Ollama token/time stats under ``_usage``.
+class LLMError(RuntimeError):
+    """A chat request failed (Ollama unreachable, model missing, error mid-stream…)."""
 
-    Callers must ``pop("_usage")`` before sending the message back to Ollama.
-    """
-    msg = dict(data.get("message") or {})
-    ms = lambda k: (data.get(k) or 0) // 1_000_000  # noqa: E731 — Ollama reports nanoseconds
-    msg["_usage"] = {
+
+def _usage(data: dict[str, Any]) -> dict[str, Any]:
+    """Ollama token/time stats of a finished request (it reports nanoseconds)."""
+    ms = lambda k: (data.get(k) or 0) // 1_000_000  # noqa: E731
+    return {
         "prompt_tokens": data.get("prompt_eval_count") or 0,
         "completion_tokens": data.get("eval_count") or 0,
         "duration_ms": ms("total_duration"),
@@ -37,20 +38,27 @@ def _with_usage(data: dict[str, Any]) -> dict[str, Any]:
         "prompt_ms": ms("prompt_eval_duration"),
         "eval_ms": ms("eval_duration"),
     }
-    return msg
+
+
+def _error_text(resp: httpx.Response) -> str:
+    try:
+        resp.read()
+        return str(resp.json().get("error") or resp.text)[:300]
+    except Exception:
+        return f"HTTP {resp.status_code}"
 
 
 class OllamaClient:
-    """Synchronous and streaming client for the Ollama chat API."""
+    """Client for the Ollama chat API."""
 
     def __init__(self) -> None:
-        """Initialise the client from application settings."""
         cfg = get_settings().ollama
         self.base_url = cfg.base_url.rstrip("/")
         self.model = cfg.model
         self.temperature = cfg.temperature
         self.timeout = cfg.timeout
         self._http: httpx.Client | None = None
+        self._caps: dict[str, list[str]] = {}
 
     @property
     def keep_alive(self) -> str:
@@ -71,26 +79,23 @@ class OllamaClient:
         return _AUTO_CTX
 
     def _options(self, temperature: float | None = None) -> dict[str, Any]:
-        return {"temperature": temperature or self.temperature, "num_ctx": self.num_ctx}
+        return {"temperature": self.temperature if temperature is None else temperature, "num_ctx": self.num_ctx}
 
     def _session(self) -> httpx.Client:
-        """One pooled HTTP client for the sync calls (reconnecting per request costs time)."""
+        """One pooled HTTP client (reconnecting per request costs time).
+
+        The timeout is per read, so a long streamed answer never times out while tokens keep coming.
+        """
         if self._http is None or self._http.timeout.read != self.timeout:
-            self._http = httpx.Client(timeout=self.timeout)
+            self._http = httpx.Client(timeout=httpx.Timeout(self.timeout, connect=5))
         return self._http
 
-    # ── Health check ─────────────────────────────────────────────────
-
-    def apply_config(
-        self,
-        base_url: str | None = None,
-        model: str | None = None,
-        temperature: float | None = None,
-        timeout: int | None = None,
-    ) -> None:
+    def apply_config(self, base_url: str | None = None, model: str | None = None,
+                     temperature: float | None = None, timeout: int | None = None) -> None:
         """Hot-reload connection parameters without recreating the client."""
         if base_url is not None:
             self.base_url = base_url.rstrip("/")
+            self._caps.clear()
         if model is not None:
             self.model = model
         if temperature is not None:
@@ -98,70 +103,89 @@ class OllamaClient:
         if timeout is not None:
             self.timeout = timeout
 
+    # ── Server / models ──────────────────────────────────────────────
+
     def is_available(self) -> bool:
-        """Return True if the Ollama server responds to /api/tags."""
+        """Return True if the Ollama server answers."""
         try:
-            with httpx.Client(timeout=5) as client:
-                resp = client.get(f"{self.base_url}/api/tags")
-                return resp.status_code == 200
+            return self._session().get(f"{self.base_url}/api/version", timeout=3).status_code == 200
         except httpx.HTTPError:
             return False
 
+    def _tags(self) -> list[dict[str, Any]]:
+        resp = self._session().get(f"{self.base_url}/api/tags", timeout=5)
+        resp.raise_for_status()
+        return resp.json().get("models", [])
+
     def list_models(self) -> list[str]:
-        """Return names of models currently available on the Ollama server."""
+        """Names of the models installed on the Ollama server (chat models only)."""
         try:
-            with httpx.Client(timeout=5) as client:
-                resp = client.get(f"{self.base_url}/api/tags")
-                resp.raise_for_status()
-                models = resp.json().get("models", [])
-                return [m.get("name", "") for m in models if m.get("name")]
+            return [m["name"] for m in self._tags() if m.get("name") and "bert" not in (m.get("details") or {}).get("family", "")]
         except httpx.HTTPError as exc:
             logger.warning("Could not list Ollama models: %s", exc)
             return []
 
     def list_models_detailed(self) -> list[dict[str, Any]]:
-        """Return installed models with size, family, parameters and quantization."""
+        """Installed models with size, family, parameters and quantization."""
         try:
-            with httpx.Client(timeout=5) as client:
-                resp = client.get(f"{self.base_url}/api/tags")
-                resp.raise_for_status()
+            tags = self._tags()
         except httpx.HTTPError:
             return []
         out = []
-        for m in resp.json().get("models", []):
+        for m in tags:
             d = m.get("details") or {}
             out.append({
-                "name": m.get("name", ""),
-                "size": m.get("size", 0),
-                "modified_at": m.get("modified_at"),
-                "family": d.get("family", ""),
-                "parameter_size": d.get("parameter_size", ""),
+                "name": m.get("name", ""), "size": m.get("size", 0), "modified_at": m.get("modified_at"),
+                "family": d.get("family", ""), "parameter_size": d.get("parameter_size", ""),
                 "quantization": d.get("quantization_level", ""),
             })
         return out
 
     def running_models(self) -> list[dict[str, Any]]:
-        """Return models currently loaded in memory (Ollama /api/ps)."""
+        """Models currently loaded in memory (Ollama /api/ps)."""
         try:
-            with httpx.Client(timeout=5) as client:
-                resp = client.get(f"{self.base_url}/api/ps")
-                resp.raise_for_status()
-                return [
-                    {"name": m.get("name"), "size_vram": m.get("size_vram", 0), "expires_at": m.get("expires_at")}
-                    for m in resp.json().get("models", [])
-                ]
+            resp = self._session().get(f"{self.base_url}/api/ps", timeout=5)
+            resp.raise_for_status()
+            return [
+                {"name": m.get("name"), "size_vram": m.get("size_vram", 0), "expires_at": m.get("expires_at")}
+                for m in resp.json().get("models", [])
+            ]
         except httpx.HTTPError:
             return []
 
-    def pull_model(self, name: str, on_progress: Any = None) -> None:
-        """Download a model, calling ``on_progress(status, completed, total)`` per chunk.
+    def capabilities(self, model: str | None = None) -> list[str]:
+        """What a model can do (``tools``, ``thinking``, ``vision``, ``embedding``…), cached."""
+        name = model or self.model
+        if name not in self._caps:
+            try:
+                resp = self._session().post(f"{self.base_url}/api/show", json={"model": name}, timeout=10)
+                resp.raise_for_status()
+                self._caps[name] = list(resp.json().get("capabilities") or [])
+            except (httpx.HTTPError, ValueError):
+                return []
+        return self._caps[name]
 
-        Raises:
-            httpx.HTTPError / RuntimeError on failure.
-        """
+    def warm(self, model: str | None = None) -> None:
+        """Load a model into memory in the background, so the first message doesn't wait for it."""
+        name = model or self.model
+
+        def run() -> None:
+            try:
+                self._session().post(f"{self.base_url}/api/generate",
+                                     json={"model": name, "keep_alive": self.keep_alive}, timeout=300)
+                self.capabilities(name)
+                logger.info("Model %s loaded", name)
+            except httpx.HTTPError as exc:
+                logger.info("Could not preload %s: %s", name, exc)
+
+        threading.Thread(target=run, name="ollama-warm", daemon=True).start()
+
+    def pull_model(self, name: str, on_progress: Any = None) -> None:
+        """Download a model, calling ``on_progress(status, completed, total)`` per chunk."""
         with httpx.Client(timeout=None) as client:
             with client.stream("POST", f"{self.base_url}/api/pull", json={"model": name}) as resp:
-                resp.raise_for_status()
+                if resp.status_code >= 400:
+                    raise RuntimeError(_error_text(resp))
                 for line in resp.iter_lines():
                     if not line:
                         continue
@@ -170,219 +194,98 @@ class OllamaClient:
                         raise RuntimeError(chunk["error"])
                     if on_progress:
                         on_progress(chunk.get("status", ""), chunk.get("completed", 0), chunk.get("total", 0))
+        self._caps.pop(name, None)
 
     def delete_model(self, name: str) -> None:
         """Remove an installed model from Ollama."""
-        with httpx.Client(timeout=30) as client:
-            resp = client.request("DELETE", f"{self.base_url}/api/delete", json={"model": name})
-            resp.raise_for_status()
+        resp = self._session().request("DELETE", f"{self.base_url}/api/delete", json={"model": name}, timeout=30)
+        resp.raise_for_status()
 
-    # ── Non-streaming chat ───────────────────────────────────────────
-
-    def chat(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None = None,
-        temperature: float | None = None,
-        model: str | None = None,
-    ) -> dict[str, Any]:
-        """Send a chat request and return the full response message.
-
-        Args:
-            messages: Conversation history in OpenAI-compatible format.
-            tools: Optional list of tool/function descriptors for
-                   Ollama native function-calling.
-            temperature: Override the default sampling temperature.
-            model: Override the configured model for this call.
-
-        Returns:
-            The assistant message dict (may contain ``tool_calls``).
-        """
-        payload: dict[str, Any] = {
-            "model": model or self.model,
-            "messages": messages,
-            "stream": False,
-            "options": self._options(temperature),
-            "keep_alive": self.keep_alive,
-        }
-        if tools:
-            payload["tools"] = tools
-
+    def embed(self, texts: list[str], model: str | None = None) -> list[list[float]]:
+        """Embedding vectors for *texts* (raises LLMError when the model is missing)."""
+        name = model or get_settings().ollama.embed_model
         try:
-            with nullcontext(self._session()) as client:
-                resp = client.post(
-                    f"{self.base_url}/api/chat",
-                    json=payload,
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                return _with_usage(data)
-        except httpx.TimeoutException:
-            logger.error("Ollama request timed out after %ss", self.timeout)
-            return {"role": "assistant", "content": "Error: LLM request timed out."}
+            resp = self._session().post(f"{self.base_url}/api/embed",
+                                        json={"model": name, "input": texts, "keep_alive": self.keep_alive}, timeout=120)
         except httpx.HTTPError as exc:
-            logger.error("Ollama HTTP error: %s", exc)
-            return {"role": "assistant", "content": f"Error: Cannot reach Ollama — {exc}"}
+            raise LLMError(f"Cannot reach Ollama at {self.base_url} — is it running?") from exc
+        if resp.status_code >= 400:
+            raise LLMError(f"Embedding model '{name}': {_error_text(resp)}")
+        return resp.json().get("embeddings") or []
 
-    # ── Streaming chat ───────────────────────────────────────────────
+    # ── Chat ─────────────────────────────────────────────────────────
 
-    def chat_stream(
-        self,
-        messages: list[dict[str, Any]],
-        temperature: float | None = None,
-    ) -> Iterator[str]:
-        """Yield content tokens as they arrive from Ollama.
-
-        Useful for updating the GUI balloon in real time.
-        """
-        payload: dict[str, Any] = {
-            "model": self.model,
-            "messages": messages,
-            "stream": True,
-            "options": self._options(temperature),
-            "keep_alive": self.keep_alive,
-        }
-
-        try:
-            with nullcontext(self._session()) as client:
-                with client.stream(
-                    "POST",
-                    f"{self.base_url}/api/chat",
-                    json=payload,
-                ) as resp:
-                    resp.raise_for_status()
-                    for line in resp.iter_lines():
-                        if not line:
-                            continue
-                        chunk = json.loads(line)
-                        token = chunk.get("message", {}).get("content", "")
-                        if token:
-                            yield token
-                        if chunk.get("done"):
-                            break
-        except httpx.TimeoutException:
-            logger.error("Ollama stream timed out")
-            yield "Error: LLM request timed out."
-        except httpx.HTTPError as exc:
-            logger.error("Ollama stream error: %s", exc)
-            yield f"Error: Cannot reach Ollama — {exc}"
+    def _think_flag(self, model: str, think: bool | None) -> bool | None:
+        """``think`` for Ollama: only sent to models that support reasoning."""
+        if "thinking" not in self.capabilities(model):
+            return None
+        if think is not None:
+            return think
+        return get_settings().ollama.think.lower() in ("on", "1", "true", "yes")
 
     def chat_events(
         self,
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
         model: str | None = None,
+        think: bool | None = None,
+        temperature: float | None = None,
     ) -> Iterator[tuple[str, Any]]:
-        """Stream a chat call with tools.
+        """Stream a chat call.
 
-        Yields ``("token", str)`` for each content chunk, then exactly one
-        ``("message", dict)`` with the assembled reply (``tool_calls`` and
-        ``_usage`` included, like :meth:`chat`).
+        Yields ``("thinking", str)`` and ``("token", str)`` chunks, then exactly one
+        ``("message", dict)`` with the assembled reply (``tool_calls``, ``thinking`` and
+        ``_usage`` included). Raises :class:`LLMError` on any failure. Closing the
+        generator early closes the connection, which makes Ollama stop generating.
         """
+        name = model or self.model
         payload: dict[str, Any] = {
-            "model": model or self.model,
-            "messages": messages,
-            "stream": True,
-            "options": self._options(),
-            "keep_alive": self.keep_alive,
+            "model": name, "messages": messages, "stream": True,
+            "options": self._options(temperature), "keep_alive": self.keep_alive,
         }
         if tools:
             payload["tools"] = tools
-        content, calls, last = "", [], {}
+        if (flag := self._think_flag(name, think)) is not None:
+            payload["think"] = flag
+        content, thinking, calls, last = "", "", [], {}
         try:
-            with nullcontext(self._session()) as client:
-                with client.stream("POST", f"{self.base_url}/api/chat", json=payload) as resp:
-                    resp.raise_for_status()
-                    for line in resp.iter_lines():
-                        if not line:
-                            continue
-                        last = json.loads(line)
-                        msg = last.get("message") or {}
-                        calls += msg.get("tool_calls") or []
-                        if msg.get("content"):
-                            content += msg["content"]
-                            yield "token", msg["content"]
-                        if last.get("done"):
-                            break
-        except httpx.TimeoutException:
-            content = content or "Error: LLM request timed out."
+            with self._session().stream("POST", f"{self.base_url}/api/chat", json=payload) as resp:
+                if resp.status_code >= 400:
+                    raise LLMError(f"Ollama ({name}): {_error_text(resp)}")
+                for line in resp.iter_lines():
+                    if not line:
+                        continue
+                    last = json.loads(line)
+                    if last.get("error"):
+                        raise LLMError(f"Ollama ({name}): {last['error']}")
+                    msg = last.get("message") or {}
+                    calls += msg.get("tool_calls") or []
+                    if msg.get("thinking"):
+                        thinking += msg["thinking"]
+                        yield "thinking", msg["thinking"]
+                    if msg.get("content"):
+                        content += msg["content"]
+                        yield "token", msg["content"]
+                    if last.get("done"):
+                        break
+        except httpx.TimeoutException as exc:
+            raise LLMError(f"Ollama did not answer within {self.timeout}s (Settings → Timeout).") from exc
         except httpx.HTTPError as exc:
-            content = content or f"Error: Cannot reach Ollama — {exc}"
-        reply = _with_usage({**last, "message": {"role": "assistant", "content": content}})
+            raise LLMError(f"Cannot reach Ollama at {self.base_url} — is it running?") from exc
+        except json.JSONDecodeError as exc:
+            raise LLMError("Ollama sent an unreadable reply.") from exc
+        reply: dict[str, Any] = {"role": "assistant", "content": content, "_usage": _usage(last)}
+        if thinking:
+            reply["thinking"] = thinking
         if calls:
             reply["tool_calls"] = calls
         yield "message", reply
 
-    # ── Async streaming (for Discord bot) ────────────────────────────
-
-    async def achat_stream(
-        self,
-        messages: list[dict[str, Any]],
-        temperature: float | None = None,
-    ) -> AsyncIterator[str]:
-        """Async variant of :meth:`chat_stream` for Discord / asyncio contexts."""
-        payload: dict[str, Any] = {
-            "model": self.model,
-            "messages": messages,
-            "stream": True,
-            "options": self._options(temperature),
-            "keep_alive": self.keep_alive,
-        }
-
-        try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                async with client.stream(
-                    "POST",
-                    f"{self.base_url}/api/chat",
-                    json=payload,
-                ) as resp:
-                    resp.raise_for_status()
-                    async for line in resp.aiter_lines():
-                        if not line:
-                            continue
-                        chunk = json.loads(line)
-                        token = chunk.get("message", {}).get("content", "")
-                        if token:
-                            yield token
-                        if chunk.get("done"):
-                            break
-        except httpx.TimeoutException:
-            logger.error("Ollama async stream timed out")
-            yield "Error: LLM request timed out."
-        except httpx.HTTPError as exc:
-            logger.error("Ollama async stream error: %s", exc)
-            yield f"Error: Cannot reach Ollama — {exc}"
-
-    async def achat(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None = None,
-        temperature: float | None = None,
-        model: str | None = None,
-    ) -> dict[str, Any]:
-        """Async non-streaming chat — used by the Discord bot path."""
-        payload: dict[str, Any] = {
-            "model": model or self.model,
-            "messages": messages,
-            "stream": False,
-            "options": self._options(temperature),
-            "keep_alive": self.keep_alive,
-        }
-        if tools:
-            payload["tools"] = tools
-
-        try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                resp = await client.post(
-                    f"{self.base_url}/api/chat",
-                    json=payload,
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                return _with_usage(data)
-        except httpx.TimeoutException:
-            logger.error("Ollama async request timed out")
-            return {"role": "assistant", "content": "Error: LLM request timed out."}
-        except httpx.HTTPError as exc:
-            logger.error("Ollama async HTTP error: %s", exc)
-            return {"role": "assistant", "content": f"Error: Cannot reach Ollama — {exc}"}
+    def chat(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
+             temperature: float | None = None, model: str | None = None) -> dict[str, Any]:
+        """Run a chat call to completion and return the reply message (see :meth:`chat_events`)."""
+        reply: dict[str, Any] = {}
+        for kind, val in self.chat_events(messages, tools=tools, model=model, temperature=temperature):
+            if kind == "message":
+                reply = val
+        return reply

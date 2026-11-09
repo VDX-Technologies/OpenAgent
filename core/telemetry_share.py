@@ -37,7 +37,7 @@ from core.hardware import _sysctl, system_profile
 
 logger = logging.getLogger(__name__)
 
-APP_VERSION = "0.4.0"
+from api import __version__ as APP_VERSION  # noqa: E402 — the real installed version (git tag)
 
 # Public VDX Core ingest; it only accepts these anonymous numbers, so no token.
 DEFAULT_URL = "https://dash.vdxtechnologies.com/api/agent/telemetry"

@@ -1,10 +1,15 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { LoaderCircle, Mic, Square } from "@lucide/svelte";
-  import { getVoice, startRecording, stopRecording, transcribe } from "#lib/api";
+  import { getRecording, getVoice, startRecording, stopRecording, transcribe } from "#lib/api";
 
-  /** Mic button: records, transcribes, and hands the text to `ontext`. */
-  let { ontext, onerror }: { ontext: (text: string) => void; onerror?: (msg: string) => void } = $props();
+  /** Mic button: records, transcribes, and hands the text to `ontext` (`onpartial` gets the live text while talking). */
+  let { ontext, onerror, onpartial, onmode }: {
+    ontext: (text: string) => void; onerror?: (msg: string) => void; onpartial?: (text: string) => void;
+    onmode?: (mode: "native" | "local" | "browser" | null) => void;
+  } = $props();
+  let level = $state(0);
+  let live: ReturnType<typeof setInterval> | undefined;
 
   type SR = { lang: string; interimResults: boolean; continuous: boolean; start(): void; stop(): void;
     onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
@@ -26,14 +31,15 @@
     const canRecord = !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined";
     getVoice()
       .then((v) => (mode = v.native ? "native" : v.available && canRecord ? "local" : browserSR() ? "browser" : null))
-      .catch(() => (mode = browserSR() ? "browser" : null));
+      .catch(() => (mode = browserSR() ? "browser" : null))
+      .finally(() => onmode?.(mode));
     return () => {
-      stopTracks(); clearInterval(timer);
+      stopTracks(); clearInterval(timer); clearInterval(live);
       if (mode === "native" && phase === "recording") stopRecording(true).catch(() => {});
     };
   });
 
-  function fail(msg: string) { phase = "idle"; clearInterval(timer); onerror?.(msg); }
+  function fail(msg: string) { phase = "idle"; clearInterval(timer); clearInterval(live); level = 0; onpartial?.(""); onerror?.(msg); }
 
   function stopTracks() { recorder?.stream.getTracks().forEach((t) => t.stop()); }
 
@@ -59,13 +65,23 @@
 
   async function startNative() {
     try { await startRecording(); }
-    catch (e) { fail(e instanceof Error ? e.message : "Could not start recording"); }
+    catch (e) { return fail(e instanceof Error ? e.message : "Could not start recording"); }
+    // phrases are transcribed on the Mac while the user is still talking: show them live
+    live = setInterval(async () => {
+      const s = await getRecording().catch(() => null);
+      if (!s || phase !== "recording") return;
+      level = s.level;
+      onpartial?.(s.text);
+    }, 350);
   }
 
   async function stopNative() {
+    clearInterval(live);
+    level = 0;
     phase = "working";
     try {
       const { text } = await stopRecording();
+      onpartial?.("");
       if (text) ontext(text);
       phase = "idle";
     } catch (e) { fail(e instanceof Error ? e.message : "Transcription failed"); }
@@ -107,6 +123,7 @@
     class="flex h-8 items-center justify-center gap-1.5 rounded-full px-2 text-[12px] transition-colors
       {phase === 'recording' ? 'bg-[var(--danger)] text-white' : 'text-[var(--text-muted)] hover:text-[var(--text)]'}">
     {#if phase === "recording"}
+      <span class="h-2 w-2 rounded-full bg-white transition-transform" style:transform="scale({1 + level * 1.5})"></span>
       <Square size={12} strokeWidth={2.4} class="fill-current" />
       <span class="tabular-nums">{Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}</span>
     {:else if phase === "working"}

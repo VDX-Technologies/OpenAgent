@@ -20,9 +20,17 @@ export type AgentStatus = {
 };
 
 export type ChatMessage = {
-  role: "user" | "assistant";
+  id?: number;
+  role: "user" | "assistant" | "tool";
   content: string;
   created_at?: string;
+  model?: string | null;
+  thinking?: string;
+  stopped?: boolean;
+  // tool steps
+  name?: string;
+  args?: Record<string, unknown>;
+  ok?: boolean;
 };
 
 export type SettingsPayload = {
@@ -41,6 +49,10 @@ export type SettingsPayload = {
   code_workspace: string;
   ntfy_server?: string;
   ntfy_topic?: string;
+  ollama_think?: string;
+  tool_routing?: boolean;
+  whisper_model?: string;
+  whisper_language?: string;
 };
 
 export type Connector = {
@@ -82,8 +94,12 @@ export function getStatus() {
 }
 
 export function getModels() {
-  return request<{ models: string[] }>("/api/models");
+  return request<{ models: string[]; thinking: string[] }>("/api/models");
 }
+
+/** Load a model into memory now, so the first message doesn't wait for it. */
+export const warmModel = (name: string) =>
+  request<{ status: string }>("/api/models/warm", { method: "POST", body: JSON.stringify({ name }) }).catch(() => null);
 
 export function getHistory(limit = 50) {
   return request<{ messages: ChatMessage[] }>(`/api/history?limit=${limit}&source=web`);
@@ -105,17 +121,30 @@ export function sendChat(message: string, model?: string, conversationId?: numbe
   });
 }
 
+export type Approval = { id: string; name: string; label: string; args: Record<string, unknown> };
+
 export type StreamEvent =
   | { type: "start"; conversation_id: number | null }
+  | { type: "status"; text: string }
   | { type: "token"; text: string }
-  | { type: "tool"; name: string }
-  | { type: "done"; reply: string; conversation_id: number | null; usage: Usage }
+  | { type: "thinking"; text: string }
+  | { type: "tool_round"; text: string }
+  | { type: "tool"; name: string; args: Record<string, unknown> }
+  | { type: "tool_result"; name: string; ok: boolean; preview: string }
+  | ({ type: "approval" } & Approval)
+  | { type: "approval_done"; id: string; allow: boolean }
+  | { type: "done"; reply: string; conversation_id: number | null; usage: Usage; stopped?: boolean }
   | { type: "error"; detail: string };
 
-/** Extra context sent with one message: data-URL images, web pages, referenced chats. */
-export type Attachments = { images?: string[]; urls?: string[]; ref_conversations?: number[] };
+/** Extra context sent with one message: data-URL images, web pages, referenced chats, documents. */
+export type Attachments = {
+  images?: string[]; urls?: string[]; ref_conversations?: number[]; files?: { name: string; data: string }[];
+};
 
-/** Stream a chat turn (SSE): tokens as they are generated, tool calls, then the final reply. */
+/** How a turn is sent: a new message, an edit of an earlier one, or a regeneration of the last answer. */
+export type TurnOptions = { think?: boolean | null; regenerate?: boolean; edit_of?: number | null };
+
+/** Stream a chat turn (SSE): tokens as they are generated, tool steps, approvals, then the final reply. */
 export async function streamChat(
   message: string,
   onEvent: (e: StreamEvent) => void,
@@ -123,14 +152,18 @@ export async function streamChat(
   conversationId?: number | null,
   signal?: AbortSignal,
   attachments?: Attachments,
+  opts?: TurnOptions,
 ) {
   const res = await fetch(`${API_BASE}/api/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message, source: "web", model: model || null, conversation_id: conversationId ?? null, ...attachments }),
+    body: JSON.stringify({ message, source: "web", model: model || null, conversation_id: conversationId ?? null, ...attachments, ...opts }),
     signal,
   });
-  if (!res.ok || !res.body) throw new Error(res.statusText || "Stream failed");
+  if (!res.ok || !res.body) {
+    const detail = await res.json().then((b) => b.detail).catch(() => null);
+    throw new Error(detail || res.statusText || "Stream failed");
+  }
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
   let buf = "";
   for (;;) {
@@ -155,13 +188,55 @@ export type Conversation = {
   message_count?: number;
 };
 
-export function listConversations(q = "") {
-  return request<{ conversations: Conversation[] }>(`/api/conversations?q=${encodeURIComponent(q)}`);
+export function listConversations(q = "", limit = 2000) {
+  return request<{ conversations: Conversation[] }>(`/api/conversations?q=${encodeURIComponent(q)}&limit=${limit}`);
 }
 
+/** A chat with its messages, including tool steps (role "tool"). */
 export function getConversation(id: number) {
-  return request<Conversation & { messages: ChatMessage[] }>(`/api/conversations/${id}`);
+  return request<Conversation & { messages: ChatMessage[] }>(`/api/conversations/${id}?steps=1`);
 }
+
+/** Stop the answer being generated in a conversation (the partial answer is kept). */
+export const stopChat = (conversationId: number | null) =>
+  request<{ stopped: boolean }>("/api/chat/stop", { method: "POST", body: JSON.stringify({ conversation_id: conversationId }) });
+
+/** The run the server is working on (it may have been started before the page reloaded). */
+export const getActiveRun = () =>
+  request<{ active: { conversation_id: number | null; source: string } | null }>("/api/chat/active");
+
+export const decideApproval =(id: string, allow: boolean, always = false) =>
+  request<{ ok: boolean }>(`/api/approvals/${id}`, { method: "POST", body: JSON.stringify({ allow, always }) });
+
+export const getApprovals = (conversationId?: number | null) =>
+  request<{ approvals: Approval[] }>(`/api/approvals${conversationId ? `?conversation_id=${conversationId}` : ""}`);
+
+export type Permission = { tool: string; label: string; always: boolean };
+export const getPermissions = () => request<{ permissions: Permission[] }>("/api/permissions");
+export const setPermission = (tool: string, always: boolean) =>
+  request<{ permissions: Permission[] }>(`/api/permissions/${tool}`, { method: "PUT", body: JSON.stringify({ enabled: always }) });
+
+// ── Memory & files ───────────────────────────────────────────────────
+
+export type Fact = { key: string; value: string; updated_at: string };
+export const getFacts = () => request<{ facts: Fact[] }>("/api/memory");
+export const saveFact = (key: string, value: string) =>
+  request<{ facts: Fact[] }>("/api/memory", { method: "PUT", body: JSON.stringify({ key, value }) });
+export const deleteFact = (key: string) =>
+  request<{ facts: Fact[] }>(`/api/memory/${encodeURIComponent(key)}`, { method: "DELETE" });
+
+export type Knowledge = {
+  folders: { path: string; added_at: string; files: number; chunks: number }[];
+  status: { running: boolean; path: string; done: number; total: number; error: string };
+};
+export const getKnowledge = () => request<Knowledge>("/api/knowledge");
+export const addKnowledge = (path: string) => request<Knowledge>("/api/knowledge", { method: "POST", body: JSON.stringify({ path }) });
+export const removeKnowledge = (path: string) =>
+  request<Knowledge>(`/api/knowledge?path=${encodeURIComponent(path)}`, { method: "DELETE" });
+
+export type MCPState = { config: string; servers: { name: string; running: boolean; tools: string[]; error: string }[] };
+export const getMCP = () => request<MCPState>("/api/mcp");
+export const saveMCP = (config: string) => request<MCPState>("/api/mcp", { method: "PUT", body: JSON.stringify({ config }) });
 
 export function updateConversation(id: number, patch: { title?: string; pinned?: boolean }) {
   return request<Conversation>(`/api/conversations/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
@@ -384,16 +459,29 @@ export function setTelemetryConsent(allow: boolean) {
   return request<TelemetryConsent>(`/api/telemetry/consent`, { method: "PUT", body: JSON.stringify({ allow }) });
 }
 
-export type Note = { id: number; title: string; text: string; conversation_id: number | null };
+export type Note = { id: number; title: string; text: string; conversation_id: number | null; read?: number; created_at?: string };
 
-/** In-app notifications (automation results) newer than `after`. */
-export const getNotifications = (after = 0) => request<{ items: Note[] }>(`/api/notifications?after=${after}`);
+/** In-app notifications (automation results) newer than `after`, or only the unread ones. */
+export const getNotifications = (after = 0, unread = false) =>
+  request<{ items: Note[] }>(`/api/notifications?after=${after}${unread ? "&unread=true" : ""}`);
+export const markNotificationsRead = (ids?: number[]) =>
+  request<{ ok: boolean }>("/api/notifications/read", { method: "POST", body: JSON.stringify({ ids: ids ?? null }) });
 
 /** Send a test push notification to the phone topic in Settings. */
 export const testPhone = () => request<{ status: string }>("/api/phone/test", { method: "POST" });
 
-/** Whether local speech-to-text (faster-whisper) is installed on the Mac. */
-export const getVoice = () => request<{ available: boolean; native: boolean }>("/api/voice");
+/** Whether local speech-to-text (faster-whisper) is installed on the Mac, and text-to-speech. */
+export const getVoice = () => request<{ available: boolean; native: boolean; tts: boolean }>("/api/voice");
+
+export type RecordingStatus = { recording: boolean; text: string; seconds: number; speaking: boolean; ended: boolean; level: number };
+/** Live text of the recording in progress and whether the speaker paused. */
+export const getRecording = () => request<RecordingStatus>("/api/voice/record/status");
+
+/** Read text aloud with a macOS voice. */
+export const speak = (text: string, language = "") =>
+  request<{ speaking: boolean }>("/api/voice/speak", { method: "POST", body: JSON.stringify({ text, language }) });
+export const isSpeaking = () => request<{ speaking: boolean }>("/api/voice/speak");
+export const stopSpeaking = () => request<{ speaking: boolean }>("/api/voice/speak", { method: "DELETE" }).catch(() => null);
 
 /** Record the Mac's microphone from the backend (works in the app window, which can't use the mic itself). */
 export const startRecording = () => request<{ status: string }>("/api/voice/record/start", { method: "POST" });

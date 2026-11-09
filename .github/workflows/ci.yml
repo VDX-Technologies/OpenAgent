@@ -14,7 +14,10 @@ jobs:
         with:
           python-version: "3.10"
       # macOS-only deps (pywebview/pyobjc) can't install here; just make sure everything compiles
-      - run: python -m compileall -q api core tools interface main.py desktop.py
+      - run: python -m compileall -q api core tools interface main.py desktop.py tests
+      # the unit tests need no Ollama, macOS or speech models
+      - run: pip install fastapi httpx pydantic python-dotenv numpy pypdf pytest
+      - run: python -m pytest -q tests
 
   ui:
     runs-on: ubuntu-latest

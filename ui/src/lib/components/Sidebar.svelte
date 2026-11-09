@@ -1,14 +1,15 @@
 <script lang="ts">
-  import { ChartLine, Layers, PanelLeft, Pencil, Pin, PinOff, Search, Settings, SquarePen, X, Zap } from "@lucide/svelte";
+  import { Brain, ChartLine, Layers, PanelLeft, Pencil, Pin, PinOff, Search, Settings, SquarePen, X, Zap } from "@lucide/svelte";
   import { confirmAction } from "#lib/confirm.svelte";
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
   import { deleteConversation, listConversations, updateConversation, type Conversation } from "#lib/api";
   import { runs } from "#lib/runs.svelte";
+  import Inbox from "./Inbox.svelte";
 
   const NAV = [
-    ["/automations", "Automations", Zap], ["/models", "Models", Layers], ["/usage", "Usage", ChartLine],
+    ["/automations", "Automations", Zap], ["/memory", "Memory", Brain], ["/models", "Models", Layers], ["/usage", "Usage", ChartLine],
   ] as const;
 
   let collapsed = $state(false);
@@ -98,6 +99,7 @@
   </div>
 
   <div class="flex flex-col gap-0.5 p-2">
+    <Inbox />
     <a href="/telemetry" class="nav-item !text-[13px] !text-[var(--text-muted)] {page.url.pathname.startsWith('/telemetry') ? 'on' : ''}"><ChartLine strokeWidth={1.7} />Telemetry</a>
     <a href="/settings" class="nav-item {page.url.pathname.startsWith('/settings') ? 'on' : ''}"><Settings strokeWidth={1.7} />Settings</a>
   </div>

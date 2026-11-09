@@ -1,8 +1,20 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
-  import { getConnectors, getPulls, getStatus, getSystem, pullModel, setConnector,
+  import { createAutomation, getConnectors, getPulls, getStatus, getSystem, pullModel, setConnector,
     type Connector, type PullState, type Recommendation } from "#lib/api";
+
+  let briefing = $state<"off" | "busy" | "on" | "error">("off");
+  async function enableBriefing() {
+    briefing = "busy";
+    try {
+      await createAutomation({
+        name: "Morning briefing", kind: "daily", time: "08:00", weekdays: "0,1,2,3,4", notify: true,
+        prompt: "Give me a short morning briefing: today's calendar events, my open reminders and the unread emails that look important.",
+      });
+      briefing = "on";
+    } catch { briefing = "error"; }
+  }
   import { isOnboarded, markOnboarded, storeModel } from "#lib/ui";
 
   const STEPS = ["Welcome", "Engine", "Model", "Connectors", "Start"];
@@ -129,7 +141,18 @@
             </div>
           {:else}
             <h2 class="text-[18px] font-semibold">You're all set</h2>
-            <p class="mt-2 text-[13px] text-[var(--text-muted)]">Try one of these:</p>
+            <div class="mt-4 flex items-center gap-3 rounded-xl border border-[var(--border-strong)] p-3">
+              <div class="min-w-0 flex-1">
+                <p class="text-[13px] font-medium">☀️ Morning briefing</p>
+                <p class="mt-0.5 text-[12px] text-[var(--text-muted)]">Weekdays at 8:00: your agenda, open reminders and important email, as a notification.</p>
+              </div>
+              <button class="shrink-0 rounded-lg px-3 py-1.5 text-[12px] font-medium {briefing === 'on' ? 'text-[var(--ok)]' : 'bg-[var(--accent)] text-[var(--accent-text)]'}"
+                disabled={briefing === "busy" || briefing === "on"} onclick={enableBriefing}>
+                {briefing === "on" ? "On ✓" : briefing === "busy" ? "…" : briefing === "error" ? "Retry" : "Turn on"}
+              </button>
+            </div>
+            <p class="mt-3 text-[12px] text-[var(--text-dim)]">Tip: press <kbd class="rounded border border-[var(--border-strong)] px-1">⌥ Space</kbd> anywhere on your Mac to ask VDX something quickly.</p>
+            <p class="mt-4 text-[13px] text-[var(--text-muted)]">Or try one of these:</p>
             <div class="mt-4 flex flex-col gap-2">
               {#each IDEAS as i (i.text)}
                 <button class="rounded-lg border border-[var(--border)] px-3 py-2 text-left text-[12.5px] hover:bg-[var(--bg-hover)]"

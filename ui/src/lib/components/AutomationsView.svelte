@@ -2,6 +2,7 @@
   import { confirmAction } from "#lib/confirm.svelte";
   import { createAutomation, deleteAutomation, getAutomations, runAutomation, updateAutomation,
     type Automation, type AutomationInput, type AutomationKind } from "#lib/api";
+  import { onServerEvent } from "#lib/events";
   import PageHeader from "./PageHeader.svelte";
   import Panel from "./Panel.svelte";
 
@@ -33,7 +34,13 @@
     try { items = (await getAutomations()).automations; error = null; }
     catch (e) { error = e instanceof Error ? e.message : "API offline"; }
   }
-  $effect(() => { load(); const id = setInterval(load, 15_000); return () => clearInterval(id); });
+  // live updates come over SSE; the slow timer only refreshes the "next run" times
+  $effect(() => {
+    load();
+    const off = onServerEvent((e) => { if (e.type === "automations") load(); });
+    const id = setInterval(load, 120_000);
+    return () => { off(); clearInterval(id); };
+  });
 
   async function act(fn: () => Promise<unknown>) {
     try { await fn(); await load(); }
@@ -64,6 +71,10 @@
   <div class="min-h-0 flex-1 overflow-y-auto px-6 py-6">
     <div class="mx-auto flex max-w-5xl flex-col gap-5">
       {#if error}<p class="text-[13px] text-[var(--danger)]">{error}</p>{/if}
+      <p class="text-[12px] text-[var(--text-dim)]">
+        Automations run with nobody watching, so actions that send or delete something (email, messages, pushes…) only
+        run if you switched them on in <a href="/settings" class="text-[var(--text-muted)] underline">Settings → Permissions</a>.
+      </p>
 
       <Panel title="New automation">
         {#snippet action()}
@@ -121,13 +132,13 @@
                   <button type="button" onclick={() => (open = open === a.id ? null : a.id)} class="min-w-0 text-left">
                     <div class="flex items-center gap-2">
                       <span class="text-[13.5px] font-medium">{a.name}</span>
-                      {#if a.last_status}<span title="Last run: {a.last_status}" class="h-1.5 w-1.5 rounded-full {a.last_status === 'ok' ? 'bg-[var(--ok)]' : 'bg-[var(--danger)]'}"></span>{/if}
+                      {#if a.last_status}<span title="Last run: {a.last_status}" class="h-1.5 w-1.5 rounded-full {a.last_status === 'ok' ? 'bg-[var(--ok)]' : a.last_status === 'running' ? 'animate-pulse bg-[var(--warn)]' : 'bg-[var(--danger)]'}"></span>{/if}
                     </div>
                     <div class="mt-0.5 text-[11.5px] text-[var(--text-dim)]">{schedule(a)} · next {when(a.next_run)} · {a.runs} runs</div>
                     <p class="mt-1 line-clamp-1 text-[12px] text-[var(--text-muted)]">{a.prompt}</p>
                   </button>
                   <div class="flex shrink-0 items-center gap-3 text-[11.5px]">
-                    <button type="button" disabled={running === a.id} onclick={() => onRun(a.id)} class="text-[var(--accent)] hover:underline disabled:opacity-50">{running === a.id ? "Running…" : "Run now"}</button>
+                    <button type="button" disabled={running === a.id || a.last_status === 'running'} onclick={() => onRun(a.id)} class="text-[var(--accent)] hover:underline disabled:opacity-50">{running === a.id || a.last_status === 'running' ? "Running…" : "Run now"}</button>
                     <button type="button" onclick={() => act(() => updateAutomation(a.id, { enabled: !a.enabled }))} class="text-[var(--text-muted)] hover:text-[var(--text)]">{a.enabled ? "Pause" : "Resume"}</button>
                     <button type="button" onclick={async () => (await confirmAction(`Delete “${a.name}”?`)) && act(() => deleteAutomation(a.id))} class="text-[var(--text-dim)] hover:text-[var(--danger)]">Delete</button>
                   </div>

@@ -1,16 +1,20 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { Check, ChevronDown } from "@lucide/svelte";
-  import { getModels } from "#lib/api";
+  import { getModels, warmModel } from "#lib/api";
   import { storeModel } from "#lib/ui";
 
   let { value = $bindable(""), fallback = "" }: { value?: string; fallback?: string } = $props();
   let open = $state(false);
   let models = $state<string[]>([]);
 
-  onMount(() => { getModels().then((r) => (models = r.models)).catch(() => {}); });
+  onMount(() => {
+    getModels().then((r) => (models = r.models)).catch(() => {});
+    if (value && value !== fallback) warmModel(value);  // a model picked earlier: load it before the first message
+  });
 
-  function pick(m: string) { value = m; storeModel(m); open = false; }
+  // load the model while the user is still typing, so the answer doesn't wait for it
+  function pick(m: string) { value = m; storeModel(m); open = false; warmModel(m); }
 </script>
 
 <svelte:window onclick={() => (open = false)} />

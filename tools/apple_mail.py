@@ -22,12 +22,27 @@ def list_mail_inbox(limit: int = 10, unread_only: bool = True) -> str:
         set output to ""
         repeat with i from 1 to n
             set m to item i of msgs
-            set output to output & "• " & (sender of m) & " — " & (subject of m) & " (" & (date received of m as string) & ")" & linefeed
+            set output to output & "• [" & i & "] " & (sender of m) & " — " & (subject of m) & " (" & (date received of m as string) & ")" & linefeed
         end repeat
     end tell
     return output
     '''
     return run_applescript(script, timeout=60) or "No messages found."
+
+
+def read_mail_message(index: int, unread_only: bool = True) -> str:
+    """Full text of the inbox message at *index* (as numbered by list_mail_inbox with the same filter)."""
+    filt = "whose read status is false" if unread_only else ""
+    script = f'''
+    tell application "Mail"
+        set msgs to (messages of inbox {filt})
+        if (count of msgs) < {int(index)} then return "Error: no message number {int(index)}."
+        set m to item {int(index)} of msgs
+        return "From: " & (sender of m) & linefeed & "Subject: " & (subject of m) & linefeed & "Date: " & (date received of m as string) & linefeed & linefeed & (content of m)
+    end tell
+    '''
+    out = run_applescript(script, timeout=60)
+    return out[:10000] + ("\n…(truncated)" if len(out) > 10000 else "")
 
 
 def send_mail_app(to: str, subject: str, body: str) -> str:
@@ -56,6 +71,15 @@ TOOL_DESCRIPTORS = [
         },
     },
     {
+        "name": "read_mail_message",
+        "description": "Read the full text of a Mail.app inbox message by its number from list_mail_inbox (use the same unread_only).",
+        "parameters": {
+            "type": "object",
+            "properties": {"index": {"type": "integer"}, "unread_only": {"type": "boolean"}},
+            "required": ["index"],
+        },
+    },
+    {
         "name": "send_mail_app",
         "description": "Send an email via macOS Mail.app using its default account.",
         "parameters": {
@@ -70,4 +94,4 @@ TOOL_DESCRIPTORS = [
     },
 ]
 
-TOOLS = {"list_mail_inbox": list_mail_inbox, "send_mail_app": send_mail_app}
+TOOLS = {"list_mail_inbox": list_mail_inbox, "read_mail_message": read_mail_message, "send_mail_app": send_mail_app}

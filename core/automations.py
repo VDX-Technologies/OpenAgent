@@ -15,6 +15,7 @@ Schedules:
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 import threading
 from datetime import datetime, timedelta
@@ -57,10 +58,45 @@ def next_run(a: dict[str, Any], after: datetime | None = None) -> str | None:
     return None
 
 
+def _parse_when(value: str) -> datetime:
+    """Local naive datetime from an ISO string ("2026-11-10T09:00", "2026-11-10 09:00", with or without a zone)."""
+    s = str(value).strip().replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        raise ValueError(f"run_at must be a date and time like 2026-11-10T09:00, got '{value}'") from None
+    return dt.astimezone().replace(tzinfo=None) if dt.tzinfo else dt
+
+
+def _validate(data: dict[str, Any]) -> dict[str, Any]:
+    """Check and normalise schedule fields (raises ValueError with a readable message)."""
+    if data.get("time") is not None:
+        m = re.fullmatch(r"(\d{1,2})[:.](\d{2})", str(data["time"]).strip())
+        if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59:
+            raise ValueError(f"time must be HH:MM, got '{data['time']}'")
+        data["time"] = f"{int(m.group(1)):02d}:{m.group(2)}"
+    if data.get("weekdays") is not None:
+        try:
+            days = sorted({int(d) for d in str(data["weekdays"]).split(",") if d.strip()})
+        except ValueError:
+            raise ValueError("weekdays must be a comma list of 0 (Mon) … 6 (Sun)") from None
+        if not days or any(d < 0 or d > 6 for d in days):
+            raise ValueError("weekdays must be a comma list of 0 (Mon) … 6 (Sun)")
+        data["weekdays"] = ",".join(map(str, days))
+    if data.get("every_minutes") is not None:
+        n = int(data["every_minutes"])
+        if not 1 <= n <= 10080:
+            raise ValueError("every_minutes must be between 1 and 10080")
+        data["every_minutes"] = n
+    if data.get("run_at"):
+        data["run_at"] = _parse_when(data["run_at"]).replace(microsecond=0).isoformat()
+    return data
+
+
 class AutomationStore:
     """CRUD for the ``automations`` table (shares the MemoryManager connection)."""
 
-    def __init__(self, conn: sqlite3.Connection) -> None:
+    def __init__(self, conn: Any) -> None:
         """Create the table if needed."""
         self._conn = conn
         self._lock = threading.Lock()
@@ -112,12 +148,14 @@ class AutomationStore:
 
     def create(self, **fields: Any) -> dict[str, Any]:
         """Insert an automation; validates the schedule and computes ``next_run``."""
-        data = {k: v for k, v in fields.items() if k in _FIELDS and v is not None}
+        data = _validate({k: v for k, v in fields.items() if k in _FIELDS and v is not None})
         data.setdefault("kind", "daily")
         if data["kind"] not in KINDS:
             raise ValueError(f"kind must be one of {KINDS}")
         if not data.get("name") or not data.get("prompt"):
             raise ValueError("name and prompt are required")
+        if data["kind"] == "once" and not data.get("run_at"):
+            raise ValueError("a one-off automation needs run_at (date and time)")
         data["next_run"] = next_run({"enabled": True, **data})
         data["created_at"] = _now().isoformat()
         with self._lock:
@@ -134,7 +172,7 @@ class AutomationStore:
         if not cur:
             return None
         allowed = set(_FIELDS) | {"conversation_id", "last_run", "last_status", "last_result", "runs"}
-        data = {k: v for k, v in fields.items() if k in allowed}
+        data = _validate({k: v for k, v in fields.items() if k in allowed})
         if data.get("kind", cur["kind"]) not in KINDS:
             raise ValueError(f"kind must be one of {KINDS}")
         merged = {**cur, **data}
@@ -166,18 +204,14 @@ class AutomationStore:
         return [self._row(r) for r in rows]  # type: ignore[misc]
 
 
-_notes: list[dict[str, Any]] = []
-_notes_lock = threading.Lock()
-_note_seq = 0
-
-
 def notify(title: str, text: str, conversation_id: int | None = None) -> None:
-    """Queue an in-app notification; the UI picks it up via ``/api/notifications``."""
-    global _note_seq
-    with _notes_lock:
-        _note_seq += 1
-        _notes.append({"id": _note_seq, "title": title, "text": text[:400], "conversation_id": conversation_id})
-        del _notes[:-50]
+    """Store a notification (in-app inbox + toast), show a macOS banner, and push it to the phone if set up."""
+    from core import memory
+    from tools._applescript import notify_mac
+
+    if memory._active is not None:
+        memory._active.add_notification(title, text, conversation_id)
+    notify_mac(title, text)
     if _phone_push_on():
         from tools import phone
 
@@ -192,22 +226,24 @@ def _phone_push_on() -> bool:
     return phone.configured() and connectors.is_enabled("phone")
 
 
-def notifications_since(after: int = 0) -> list[dict[str, Any]]:
-    """Notifications with an id greater than *after* (oldest first)."""
-    with _notes_lock:
-        return [n for n in _notes if n["id"] > after]
-
-
 class Scheduler:
     """Background thread that runs due automations through the agent."""
 
-    def __init__(self, store: AutomationStore, agent: Any, lock: threading.Lock) -> None:
-        """Wire the store to an Agent; *lock* serialises agent use with the chat API."""
+    def __init__(self, store: AutomationStore, agent: Any) -> None:
+        """Wire the store to an Agent (whose lock serialises it with the chat API)."""
         global _store
         _store = store
-        self.store, self.agent, self.lock = store, agent, lock
+        self.store, self.agent = store, agent
         self._stop = threading.Event()
         self._running: set[int] = set()
+        self.on_change: Callable[[], None] | None = None
+
+    def _changed(self) -> None:
+        if self.on_change:
+            try:
+                self.on_change()
+            except Exception:
+                logger.debug("automation listener failed", exc_info=True)
 
     def start(self) -> None:
         """Start polling in a daemon thread."""
@@ -247,8 +283,10 @@ class Scheduler:
                 + (" Your reply is sent to the user's phone automatically, so don't call send_to_phone." if pushed else "")
             )
             started = _now().isoformat()
+            self.store.update(aid, last_status="running")
+            self._changed()
             try:
-                with self.lock:
+                with self.agent.lock:
                     reply = self.agent.process(a["prompt"], source="automation", model=a.get("model") or None,
                                                conversation_id=cid, context=context)
                 status = "ok"
@@ -259,8 +297,9 @@ class Scheduler:
                 aid, conversation_id=cid, last_run=started, last_status=status,
                 last_result=reply[:2000], runs=(a.get("runs") or 0) + 1,
             )
-            if a.get("notify"):
-                notify(a["name"], reply, cid)
+            if a.get("notify") or status == "error":
+                notify(a["name"] + (" failed" if status == "error" else ""), reply, cid)
+            self._changed()
             return self.store.get(aid)
         finally:
             self._running.discard(aid)

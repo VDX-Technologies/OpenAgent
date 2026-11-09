@@ -5,6 +5,15 @@
   import PageHeader from "./PageHeader.svelte";
   import Panel from "./Panel.svelte";
   import SharingPanel from "./SharingPanel.svelte";
+  import PermissionsPanel from "./PermissionsPanel.svelte";
+  import MCPPanel from "./MCPPanel.svelte";
+  import Switch from "./Switch.svelte";
+
+  const WHISPER = [
+    ["tiny", "Tiny — fastest, rough"], ["base", "Base — fast"], ["small", "Small — balanced (default)"],
+    ["medium", "Medium — accurate, slower"], ["large-v3-turbo", "Large v3 Turbo — most accurate"],
+  ];
+  const LANGS = [["", "Detect automatically"], ["it", "Italiano"], ["en", "English"], ["es", "Español"], ["fr", "Français"], ["de", "Deutsch"], ["pt", "Português"]];
 
   type Field = { key: keyof SettingsPayload; label: string; type?: string; placeholder?: string; list?: boolean };
 
@@ -43,6 +52,7 @@
     gmail_address: "", gmail_app_password: "", discord_bot_token: "", discord_prefix: "!",
     discord_allowed_users: "", whatsapp_token: "", whatsapp_phone_id: "", github_token: "", code_workspace: "",
     ntfy_server: "https://ntfy.sh", ntfy_topic: "",
+    ollama_think: "off", tool_routing: true, whisper_model: "small", whisper_language: "",
   });
   let phoneMsg = $state<{ ok: boolean; text: string } | null>(null);
 
@@ -91,6 +101,36 @@
 
   <div class="min-h-0 flex-1 overflow-y-auto px-6 py-6">
     <div class="cascade mx-auto flex max-w-3xl flex-col gap-5">
+      <Panel title="Assistant & voice">
+        <div class="grid gap-4 md:grid-cols-2">
+          <label class="flex flex-col gap-1.5">
+            <span class="label">Reasoning (qwen3, deepseek-r1…)</span>
+            <select class="field" bind:value={form.ollama_think}>
+              <option value="off">Off — fast answers</option>
+              <option value="on">On — thinks before answering</option>
+            </select>
+          </label>
+          <button type="button" role="switch" aria-checked={form.tool_routing} onclick={() => (form.tool_routing = !form.tool_routing)}
+            class="flex items-center justify-between gap-3 self-end rounded-lg border border-[var(--border)] px-3 py-2 text-left text-[12.5px]">
+            <span>Send only the tools a chat needs<span class="block text-[11.5px] text-[var(--text-dim)]">Smaller prompts, faster replies</span></span>
+            <Switch on={!!form.tool_routing} size="sm" />
+          </button>
+          <label class="flex flex-col gap-1.5">
+            <span class="label">Speech recognition model</span>
+            <select class="field" bind:value={form.whisper_model}>
+              {#each WHISPER as [v, l] (v)}<option value={v}>{l}</option>{/each}
+            </select>
+          </label>
+          <label class="flex flex-col gap-1.5">
+            <span class="label">Spoken language</span>
+            <select class="field" bind:value={form.whisper_language}>
+              {#each LANGS as [v, l] (v)}<option value={v}>{l}</option>{/each}
+            </select>
+          </label>
+        </div>
+        <p class="mt-3 text-[12px] text-[var(--text-dim)]">Setting your language skips detection, so dictation starts faster and is more accurate.</p>
+      </Panel>
+      <PermissionsPanel />
       {#each SECTIONS as s (s.title)}
         <Panel title={s.title}>
           {#snippet action()}
@@ -120,8 +160,14 @@
             </p>
             {#if phoneMsg}<p class="mt-2 text-[12px] {phoneMsg.ok ? 'text-[var(--ok)]' : 'text-[var(--danger)]'}">{phoneMsg.text}</p>{/if}
           {/if}
+          {#if s.title === "Discord" && form.discord_bot_token && !form.discord_allowed_users.trim()}
+            <p class="mt-3 text-[12px] text-[var(--warn)]">
+              The bot answers only the user IDs listed here — add yours (Discord → Settings → Advanced → Developer Mode, then right-click your name → Copy User ID).
+            </p>
+          {/if}
         </Panel>
       {/each}
+      <MCPPanel />
       <SharingPanel />
       <datalist id="vdx-models">{#each models as m (m)}<option value={m}></option>{/each}</datalist>
     </div>

@@ -1,29 +1,13 @@
 <script lang="ts" module>
-  /** One thing attached to the next message: an image (data URL), a web page URL or a chat id. */
-  export type Attached = { kind: "image" | "url" | "chat"; value: string; label: string };
-</script>
+  /** One thing attached to the next message: an image or document (data URL), a web page URL or a chat id. */
+  export type Attached = { kind: "image" | "url" | "chat" | "file"; value: string; label: string };
 
-<script lang="ts">
-  import { Image as ImageIcon, Link, MessageSquare, Plus } from "@lucide/svelte";
-  import { listConversations, type Conversation } from "#lib/api";
-
-  let { items = $bindable([]) }: { items: Attached[] } = $props();
-
-  const MAX_IMAGES = 4, MAX_URLS = 5, MAX_CHATS = 5, MAX_SIDE = 1568;
-
-  let open = $state(false);
-  let mode = $state<"menu" | "url" | "chat">("menu");
-  let url = $state("");
-  let query = $state("");
-  let chats = $state<Conversation[]>([]);
-  let fileInput: HTMLInputElement;
-
-  const count = (kind: Attached["kind"]) => items.filter((a) => a.kind === kind).length;
-
-  function close() { open = false; mode = "menu"; url = ""; query = ""; }
+  export const MAX_IMAGES = 4, MAX_FILES = 5, MAX_FILE_MB = 20;
+  const MAX_SIDE = 1568;
+  export const DOC_ACCEPT = ".pdf,.docx,.txt,.md,.markdown,.csv,.json,.yaml,.yml,.xml,.html,.py,.js,.ts,.tsx,.jsx,.svelte,.java,.kt,.swift,.go,.rs,.c,.h,.cpp,.cs,.rb,.php,.sh,.sql,.css,.log,.tex";
 
   /** Read an image file and downscale it so the request stays small. */
-  function toDataUrl(file: File): Promise<string> {
+  export function imageToDataUrl(file: File): Promise<string> {
     return new Promise((resolve, reject) => {
       const img = new Image();
       const src = URL.createObjectURL(file);
@@ -41,12 +25,53 @@
     });
   }
 
-  async function addImages(files: FileList | null) {
-    for (const f of Array.from(files ?? [])) {
-      if (!f.type.startsWith("image/") || count("image") >= MAX_IMAGES) continue;
-      try { items.push({ kind: "image", value: await toDataUrl(f), label: f.name }); } catch { /* skip */ }
+  const fileToDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result));
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(file);
+  });
+
+  /** Turn dropped / picked files into attachments (images are downscaled, documents read as-is). */
+  export async function filesToAttachments(files: Iterable<File>, current: Attached[]): Promise<Attached[]> {
+    const out: Attached[] = [];
+    const n = (k: Attached["kind"]) => current.filter((a) => a.kind === k).length + out.filter((a) => a.kind === k).length;
+    for (const f of files) {
+      try {
+        if (f.type.startsWith("image/")) {
+          if (n("image") < MAX_IMAGES) out.push({ kind: "image", value: await imageToDataUrl(f), label: f.name });
+        } else if (n("file") < MAX_FILES && f.size <= MAX_FILE_MB * 1024 * 1024) {
+          out.push({ kind: "file", value: await fileToDataUrl(f), label: f.name });
+        }
+      } catch { /* skip unreadable files */ }
     }
-    fileInput.value = "";
+    return out;
+  }
+</script>
+
+<script lang="ts">
+  import { FileText, Image as ImageIcon, Link, MessageSquare, Plus } from "@lucide/svelte";
+  import { listConversations, type Conversation } from "#lib/api";
+
+  let { items = $bindable([]) }: { items: Attached[] } = $props();
+
+  const MAX_URLS = 5, MAX_CHATS = 5;
+  let docInput: HTMLInputElement;
+
+  let open = $state(false);
+  let mode = $state<"menu" | "url" | "chat">("menu");
+  let url = $state("");
+  let query = $state("");
+  let chats = $state<Conversation[]>([]);
+  let fileInput: HTMLInputElement;
+
+  const count = (kind: Attached["kind"]) => items.filter((a) => a.kind === kind).length;
+
+  function close() { open = false; mode = "menu"; url = ""; query = ""; }
+
+  async function addFiles(files: FileList | null, input: HTMLInputElement) {
+    items.push(...(await filesToAttachments(Array.from(files ?? []), items)));
+    input.value = "";
     close();
   }
 
@@ -72,7 +97,9 @@
 <svelte:window onclick={close} />
 
 <input bind:this={fileInput} type="file" accept="image/*" multiple class="hidden"
-  onchange={(e) => addImages(e.currentTarget.files)} />
+  onchange={(e) => addFiles(e.currentTarget.files, fileInput)} />
+<input bind:this={docInput} type="file" accept={DOC_ACCEPT} multiple class="hidden"
+  onchange={(e) => addFiles(e.currentTarget.files, docInput)} />
 
 <div class="relative">
   <button type="button" title="Attach" onclick={(e) => { e.stopPropagation(); open ? close() : (open = true); }}
@@ -87,6 +114,10 @@
         <button type="button" disabled={count("image") >= MAX_IMAGES} onclick={() => fileInput.click()}
           class="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[12.5px] hover:bg-[var(--bg-hover)] disabled:opacity-40">
           <ImageIcon size={15} strokeWidth={1.7} class="text-[var(--text-muted)]" /> Upload image
+        </button>
+        <button type="button" disabled={count("file") >= MAX_FILES} onclick={() => docInput.click()}
+          class="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[12.5px] hover:bg-[var(--bg-hover)] disabled:opacity-40">
+          <FileText size={15} strokeWidth={1.7} class="text-[var(--text-muted)]" /> Attach document (PDF, Word, text, code)
         </button>
         <button type="button" disabled={count("url") >= MAX_URLS} onclick={() => (mode = "url")}
           class="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[12.5px] hover:bg-[var(--bg-hover)] disabled:opacity-40">

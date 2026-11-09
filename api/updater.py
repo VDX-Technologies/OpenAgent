@@ -12,7 +12,10 @@ release notes. ``apply()`` installs it without ever leaving a half-updated app:
 2. the clone is force-checked-out to the tag, Python dependencies are synced
    (packages the release dropped are uninstalled) and the new UI build replaces
    the old one; if this step fails the previous version is restored;
-3. the temporary worktree is deleted.
+3. the release's own post-update steps run (``api/post_update.py``: the macOS
+   app bundle — permissions, launcher, icon — and whatever a future release
+   adds), so an update never needs ``scripts/install.sh`` again;
+4. the temporary worktree is deleted.
 
 ``restart()`` then re-executes the process so the new code runs.
 """
@@ -237,6 +240,17 @@ def _apply(tag: str) -> None:
             _run("pnpm", "install", "--frozen-lockfile", "--silent", cwd=ROOT / "ui")
         except Exception:
             pass
+
+        # Everything else the release needs (app bundle permissions, launcher, …), run with the
+        # release's own code: this process still runs the old modules until it restarts.
+        step("Finishing")
+        if (ROOT / "api" / "post_update.py").exists():
+            venv = ROOT / ".venv" / "bin" / "python"
+            try:
+                out = _run(str(venv if venv.exists() else sys.executable), "-m", "api.post_update", timeout=600)
+                logger.info("Post-update: %s", out.strip())
+            except Exception:
+                logger.warning("Post-update steps failed (the app retries them on start)", exc_info=True)
         _state["done"] = True
     except Exception as e:
         logger.exception("Update to %s failed", tag)

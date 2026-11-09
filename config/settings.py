@@ -40,6 +40,12 @@ class OllamaConfig:
     num_ctx: int = field(default_factory=lambda: int(_env("OLLAMA_NUM_CTX", "0") or 0))
     # how long Ollama keeps the model loaded after a request (its default, 5m, means slow reloads)
     keep_alive: str = field(default_factory=lambda: _env("OLLAMA_KEEP_ALIVE", "30m"))
+    # reasoning for models that support it (qwen3, deepseek-r1…): off is much faster
+    think: str = field(default_factory=lambda: _env("OLLAMA_THINK", "off"))
+    # send only the tool schemas a message needs (smaller prompts, faster replies)
+    tool_routing: bool = field(default_factory=lambda: _env("TOOL_ROUTING", "1") != "0")
+    # model used to index local files for search
+    embed_model: str = field(default_factory=lambda: _env("EMBED_MODEL", "nomic-embed-text"))
 
 
 @dataclass
@@ -94,6 +100,8 @@ class VoiceConfig:
 
     # tiny / base / small / medium / large-v3 — bigger is more accurate and slower
     whisper_model: str = field(default_factory=lambda: _env("WHISPER_MODEL", "small"))
+    # spoken language ("it", "en", …); empty = detect it (slower on the first words)
+    language: str = field(default_factory=lambda: _env("WHISPER_LANGUAGE", ""))
 
 
 @dataclass
@@ -131,6 +139,10 @@ class Settings:
     disabled_connectors: list[str] = field(default_factory=lambda: [
         c.strip() for c in _env("CONNECTORS_DISABLED", "").split(",") if c.strip()
     ])
+    # actions (send / delete / push…) the user allowed to run without asking each time
+    always_allowed: list[str] = field(default_factory=lambda: [
+        c.strip() for c in _env("APPROVAL_ALWAYS", "").split(",") if c.strip()
+    ])
 
 
 _settings: Settings | None = None
@@ -157,7 +169,8 @@ def _upsert_env_key(content: str, key: str, value: str) -> str:
     pattern = re.compile(rf"^{re.escape(key)}=.*$", re.MULTILINE)
     line = f"{key}={value}"
     if pattern.search(content):
-        return pattern.sub(line, content)
+        # a function, not a template: values may contain backslashes (\1, \g…) that re would expand
+        return pattern.sub(lambda _m: line, content, count=1)
     if content and not content.endswith("\n"):
         content += "\n"
     return content + line + "\n"

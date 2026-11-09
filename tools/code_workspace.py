@@ -37,8 +37,8 @@ def _safe(rel: str) -> Path:
     return path
 
 
-def _git(*args: str, timeout: int = 60) -> str:
-    """Run git in the workspace and return combined output."""
+def _git(*args: str, timeout: int = 60, ok_codes: tuple[int, ...] = (0,)) -> str:
+    """Run git in the workspace and return combined output (``Error …`` on a return code not in *ok_codes*)."""
     root = _root()
     if root is None:
         return "Error: no workspace set."
@@ -54,7 +54,7 @@ def _git(*args: str, timeout: int = 60) -> str:
     except FileNotFoundError:
         return "Error: git is not installed."
     out = (r.stdout + r.stderr).strip()
-    return out if r.returncode == 0 else f"Error (git {args[0]}): {out}"
+    return out if r.returncode in ok_codes else f"Error (git {args[0]}): {out}"
 
 
 def _guard(fn):
@@ -133,7 +133,8 @@ def edit_file(path: str, old: str, new: str) -> str:
 @_guard
 def search_code(query: str) -> str:
     """Search tracked files for a string (git grep)."""
-    return _git("grep", "-n", "-I", "--", query)[:MAX_READ] or "No matches."
+    # git grep exits with 1 when nothing matches: that's an answer, not an error
+    return _git("grep", "-n", "-I", "--", query, ok_codes=(0, 1))[:MAX_READ] or f"No matches for '{query}'."
 
 
 def git_status() -> str:

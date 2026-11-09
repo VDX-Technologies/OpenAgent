@@ -11,6 +11,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from tools import _eventkit
 from tools._applescript import esc, run_applescript
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,19 @@ _FMT = (' & (year of d as integer) & "-" & text -2 thru -1 of ("0" & ((month of 
 
 def _list_between(start: datetime, end: datetime, calendar_name: str = "") -> str:
     """Events starting in [start, end) across all calendars (or just *calendar_name*)."""
-    cals = f"{{{_cal_ref(calendar_name)}}}" if calendar_name and calendar_name.lower() != "calendar" else "calendars"
+    if _eventkit.ready("event"):
+        try:
+            evs = _eventkit.events_between(start, end, calendar_name)
+            return "\n".join(
+                f"{e['start']:%Y-%m-%d} {'all day' if e['all_day'] else format(e['start'], '%H:%M')} — {e['title']} "
+                f"[{e['calendar']}]" + (f" @ {e['location']}" if e["location"] else "")
+                for e in evs
+            )
+        except ValueError as exc:
+            return f"Error: {exc}"
+        except Exception:
+            logger.warning("EventKit read failed, using AppleScript", exc_info=True)
+    cals =f"{{{_cal_ref(calendar_name)}}}" if calendar_name and calendar_name.lower() != "calendar" else "calendars"
     script = _date_expr("startD", start) + _date_expr("endD", end) + f'''
     set output to ""
     tell application "Calendar"
@@ -97,19 +110,28 @@ def list_today_events(calendar_name: str = "") -> str:
 
 
 def delete_event(title: str, calendar_name: str = "") -> str:
-    """Delete the first upcoming event matching *title* (any calendar unless one is named)."""
+    """Delete the next upcoming event (from today on) matching *title* — never a past one."""
     cals = f"{{{_cal_ref(calendar_name)}}}" if calendar_name and calendar_name.lower() != "calendar" else "calendars"
-    script = f'''
+    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    script = _date_expr("fromD", today) + f'''
+    set best to missing value
+    set bestCal to ""
     tell application "Calendar"
         repeat with cal in {cals}
-            set matches to (every event of cal whose summary is "{esc(title)}")
-            if (count of matches) > 0 then
-                delete item 1 of matches
-                return "Deleted event: {esc(title)} from " & (name of cal)
-            end if
+            set matches to (every event of cal whose summary is "{esc(title)}" and start date ≥ fromD)
+            repeat with ev in matches
+                if best is missing value or (start date of ev) < (start date of best) then
+                    set best to contents of ev
+                    set bestCal to name of cal
+                end if
+            end repeat
         end repeat
+        if best is missing value then return "No upcoming event found with title: {esc(title)}"
+        set d to start date of best
+        set whenText to ""{_FMT}
+        delete best
     end tell
-    return "No event found with title: {esc(title)}"
+    return "Deleted event: {esc(title)} on " & whenText & " from " & bestCal
     '''
     logger.info("Deleting calendar event: %s", title)
     return run_applescript(script, timeout=90)

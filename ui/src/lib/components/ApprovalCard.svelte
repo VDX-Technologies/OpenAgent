@@ -16,8 +16,12 @@
 
   async function answer(allow: boolean, always = false) {
     busy = true; error = "";
-    try { await decideApproval(approval.id, allow, always); ondone?.(); }
-    catch (e) { error = e instanceof Error ? e.message : "Failed"; busy = false; }
+    try {
+      await decideApproval(approval.id, allow, always);
+      // Settings → Permissions listens for this to flip its switch on
+      if (always) window.dispatchEvent(new CustomEvent("vdx:permissions-changed"));
+      ondone?.();
+    } catch (e) { error = e instanceof Error ? e.message : "Failed"; busy = false; }
   }
 </script>
 
@@ -35,11 +39,10 @@
   </dl>
   {#if error}<p class="mt-2 text-[12px] text-[var(--danger)]">{error}</p>{/if}
   <div class="mt-4 flex flex-wrap items-center gap-2">
-    <button disabled={busy} onclick={() => answer(true)}
+    <button disabled={busy} onclick={() => answer(true)} title="Run it this time only"
       class="rounded-lg bg-[var(--accent)] px-3.5 py-1.5 text-[12.5px] font-medium text-[var(--accent-text)] disabled:opacity-50">Allow</button>
+    <button disabled={busy} onclick={() => answer(true, true)} class="ghost-btn !text-[12.5px]"
+      title="Run this kind of action without asking from now on (switches it on in Settings → Permissions)">Always allow</button>
     <button disabled={busy} onclick={() => answer(false)} class="ghost-btn !text-[12.5px]">Don't allow</button>
-    <div class="flex-1"></div>
-    <button disabled={busy} onclick={() => answer(true, true)} class="text-[12px] text-[var(--text-dim)] hover:text-[var(--text)]"
-      title="Run this kind of action without asking (change it in Settings → Permissions)">Always allow</button>
   </div>
 </div>

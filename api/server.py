@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import re
+import queue
 import threading
 from collections import deque
 from collections.abc import Iterator
@@ -398,12 +399,33 @@ def chat_stream(body: ChatRequest) -> StreamingResponse:
         nonlocal text
         send = lambda ev: f"data: {json.dumps(ev, ensure_ascii=False, default=str)}\n\n"  # noqa: E731
         yield send({"type": "start", "conversation_id": cid})
+        shown: set[str] = set()  # approvals of the run ahead shown on this stream
         if not a.lock.acquire(blocking=False):
             yield send({"type": "status", "text": f"Waiting for {_busy_label(a)} to finish…"})
             with _queue_lock:
                 _waiting[cid] = _waiting.get(cid, 0) + 1
             try:
-                a.lock.acquire()
+                # The run ahead may be blocked on an approval whose card isn't on screen
+                # (page reloaded, other chat, quick window closed): show it here too, so
+                # the user can answer it instead of watching this one spin.
+                while not a.lock.acquire(timeout=0.5):
+                    with _queue_lock:
+                        stopped = cid in _cancelled
+                        _cancelled.discard(cid)
+                    if stopped:  # stopped while queued: give up without running
+                        for aid in shown:
+                            yield send({"type": "approval_done", "id": aid, "allow": False})
+                        yield send({"type": "done", "reply": "", "usage": {}, "stopped": True, "conversation_id": cid})
+                        return
+                    open_ = {p["id"]: p for p in approvals.pending()}
+                    for aid in shown - open_.keys():
+                        yield send({"type": "approval_done", "id": aid, "allow": False})
+                        yield send({"type": "status", "text": f"Waiting for {_busy_label(a)} to finish…"})
+                    for aid, p in open_.items():
+                        if aid not in shown:
+                            yield send({"type": "status", "text": "Another chat is waiting for your approval…"})
+                            yield send({"type": "approval", "id": aid, "name": p["name"], "label": p["label"], "args": p["args"]})
+                    shown = set(open_)
             finally:
                 with _queue_lock:
                     _waiting[cid] -= 1
@@ -416,33 +438,48 @@ def chat_stream(body: ChatRequest) -> StreamingResponse:
                 a.lock.release()
                 yield send({"type": "done", "reply": "", "usage": {}, "stopped": True, "conversation_id": cid})
                 return
-        try:
-            context, images = "", []
-            if body.regenerate:
-                a.memory.delete_after(cid, last["id"])
-            else:
-                if body.urls or body.files or body.ref_conversations:
-                    yield send({"type": "status", "text": "Reading attachments…"})
-                context, images, note = _attachments(body, a)
-                context = "\n\n".join(p for p in (old_extra.get("context", ""), context) if p)
-                images = (old_extra.get("images") or []) + images
-                note = "\n".join(p for p in (old_note, note) if p)
-                text = text + (f"\n\n{note}" if note else "")
-                if body.edit_of is not None:
-                    a.memory.delete_from(cid, body.edit_of)
-            for ev in a.run(text, source=body.source, model=body.model or None, conversation_id=cid,
-                            context=context, images=images[:8], think=body.think, reuse_last=body.regenerate,
-                            approve=lambda aid, _n, _a: approvals.wait(aid, a._cancel)):
-                if ev["type"] == "done":
-                    ev["conversation_id"] = cid
-                yield send(ev)
-        except LLMError as exc:
-            yield send({"type": "error", "detail": str(exc)})
-        except Exception as exc:
-            logger.exception("Stream failed")
-            yield send({"type": "error", "detail": f"Agent error: {exc}"})
-        finally:
-            a.lock.release()
+        for aid in shown:  # the run ahead is done: drop its cards from this stream
+            yield send({"type": "approval_done", "id": aid, "allow": False})
+
+        # The turn runs in its own thread and this stream only relays its events: if the
+        # page goes away (reload, other chat, quick window closed) the turn still finishes
+        # and frees the agent, instead of staying parked on an unsent event forever.
+        out: queue.Queue[dict[str, Any] | None] = queue.Queue()
+
+        def work() -> None:
+            nonlocal text
+            try:
+                context, images = "", []
+                if body.regenerate:
+                    a.memory.delete_after(cid, last["id"])
+                else:
+                    if body.urls or body.files or body.ref_conversations:
+                        out.put({"type": "status", "text": "Reading attachments…"})
+                    context, images, note = _attachments(body, a)
+                    context = "\n\n".join(p for p in (old_extra.get("context", ""), context) if p)
+                    images = (old_extra.get("images") or []) + images
+                    note = "\n".join(p for p in (old_note, note) if p)
+                    text = text + (f"\n\n{note}" if note else "")
+                    if body.edit_of is not None:
+                        a.memory.delete_from(cid, body.edit_of)
+                for ev in a.run(text, source=body.source, model=body.model or None, conversation_id=cid,
+                                context=context, images=images[:8], think=body.think, reuse_last=body.regenerate,
+                                approve=lambda aid, _n, _a: approvals.wait(aid, a._cancel)):
+                    if ev["type"] == "done":
+                        ev["conversation_id"] = cid
+                    out.put(ev)
+            except LLMError as exc:
+                out.put({"type": "error", "detail": str(exc)})
+            except Exception as exc:
+                logger.exception("Stream failed")
+                out.put({"type": "error", "detail": f"Agent error: {exc}"})
+            finally:
+                a.lock.release()
+                out.put(None)
+
+        threading.Thread(target=work, name=f"chat-{cid}", daemon=True).start()
+        while (ev := out.get()) is not None:
+            yield send(ev)
 
     return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
 

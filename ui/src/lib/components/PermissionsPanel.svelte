@@ -6,7 +6,20 @@
 
   /** Which actions run without asking. Everything else shows an approval card first. */
   let items = $state<Permission[]>([]);
-  onMount(() => { getPermissions().then((r) => (items = r.permissions)).catch(() => {}); });
+  const load = () => getPermissions().then((r) => (items = r.permissions)).catch(() => {});
+  onMount(() => {
+    load();
+    // "Always allow" on an approval card (here or in another window) turns a switch on
+    const onVisible = () => document.visibilityState === "visible" && load();
+    window.addEventListener("vdx:permissions-changed", load);
+    window.addEventListener("focus", load);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("vdx:permissions-changed", load);
+      window.removeEventListener("focus", load);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  });
 
   async function toggle(p: Permission) {
     try { items = (await setPermission(p.tool, !p.always)).permissions; } catch { /* keep the old state */ }

@@ -263,6 +263,7 @@ class Agent:
                               "right now. Tell the user they can allow it in Settings → Permissions to run it unattended.")
                 else:
                     aid = approvals.create(name, args, conversation_id)
+                    logger.info("Waiting for approval %s: %s (conversation %s)", aid, name, conversation_id)
                     yield {"type": "approval", "id": aid, "name": name, "label": approvals.label(name), "args": args}
                     allowed = approve(aid, name, args)
                     yield {"type": "approval_done", "id": aid, "allow": allowed}

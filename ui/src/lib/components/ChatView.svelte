@@ -126,6 +126,18 @@
 
   $effect(() => { if (run?.stream || run?.steps.length || run?.approval) scrollDown(); });
 
+  // Safety net: while a turn runs, ask the server for approvals directly, so the card shows
+  // up even if its event never reaches this window (the run would otherwise wait unseen).
+  $effect(() => {
+    if (!busy) return;
+    const id = convId;
+    const poll = () => getApprovals(id).then((r) => {
+      serverApprovals = r.approvals.filter((a) => a.id !== untrack(() => run?.approval?.id));
+    }).catch(() => {});
+    const t = setInterval(poll, 1500);
+    return () => { clearInterval(t); serverApprovals = []; };
+  });
+
   function onRunEnd(ev: Event) {
     const e = (ev as CustomEvent<RunEnd>).detail;
     if (e.id !== convId) return;

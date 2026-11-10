@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { onMount, tick } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
+  import { getApprovals, type Approval } from "#lib/api";
   import { ArrowUpRight, Plus } from "@lucide/svelte";
   import { renderMarkdown } from "#lib/markdown";
   import { runs, startRun, stopRun } from "#lib/runs.svelte";
@@ -44,6 +45,18 @@
     if (e.key === "Escape") { e.preventDefault(); if (run) stopRun(convId); else api().hide_quick?.(); }
   }
   const shown = $derived(run ? run.stream : reply);
+
+  // Same safety net as the main chat: fetch pending approvals while a run is going.
+  let polled = $state<Approval[]>([]);
+  const busy = $derived(!!run);
+  $effect(() => {
+    if (!busy) return;
+    const id = convId;
+    const t = setInterval(() => getApprovals(id).then((r) => {
+      polled = r.approvals.filter((a) => a.id !== untrack(() => run?.approval?.id));
+    }).catch(() => {}), 1500);
+    return () => { clearInterval(t); polled = []; };
+  });
 </script>
 
 <div class="flex h-screen flex-col overflow-hidden bg-[var(--bg-panel)] text-[var(--text)]">
@@ -60,6 +73,9 @@
   <div class="min-h-0 flex-1 overflow-y-auto px-5 py-4">
     {#if error}<p class="mb-2 text-[12.5px] text-[var(--danger)]">{error}</p>{/if}
     {#if run?.approval}<ApprovalCard approval={run.approval} />{/if}
+    {#each polled as a (a.id)}
+      <ApprovalCard approval={a} ondone={() => (polled = polled.filter((x) => x.id !== a.id))} />
+    {/each}
     {#if shown}
       <div class="prose-vdx text-[14px]">{@html renderMarkdown(shown, !!run)}</div>
     {:else if run}
